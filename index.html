@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Advanced Classes, Sonai</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="root">
+      <style>
+        body { margin: 0; background-color: #000; }
+        #apple-loader {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          height: 100vh;
+          width: 100vw;
+          background-color: #050505;
+          color: #fff;
+          font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .apple-logo-placeholder {
+          width: 70px;
+          height: 70px;
+          border-radius: 18px;
+          background: linear-gradient(135deg, #1d4ed8 0%, #a855f7 100%);
+          margin-bottom: 40px;
+          position: relative;
+          animation: floatGlow 3s ease-in-out infinite;
+        }
+        .apple-logo-placeholder::after {
+          content: '';
+          position: absolute;
+          inset: 4px;
+          border-radius: 14px;
+          background: #050505;
+        }
+        .apple-logo-inner {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10;
+          font-weight: 800;
+          font-size: 24px;
+          background: linear-gradient(135deg, #1d4ed8 0%, #a855f7 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        @keyframes floatGlow {
+          0%, 100% { box-shadow: 0 0 20px rgba(168, 85, 247, 0.4); transform: translateY(0px) scale(1); }
+          50% { box-shadow: 0 0 40px rgba(168, 85, 247, 0.8); transform: translateY(-5px) scale(1.02); }
+        }
+        .loading-bar-container {
+          width: 200px;
+          height: 3px;
+          background: #222;
+          border-radius: 10px;
+          overflow: hidden;
+        }
+        .loading-bar {
+          height: 100%;
+          background: linear-gradient(90deg, #1d4ed8, #a855f7);
+          width: 0%;
+          border-radius: 10px;
+          animation: loadbar 2.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+        }
+        @keyframes loadbar {
+          0% { width: 0%; }
+          10% { width: 10%; }
+          40% { width: 30%; }
+          60% { width: 80%; }
+          100% { width: 100%; }
+        }
+        .loading-text {
+          margin-top: 24px;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 4px;
+          text-transform: uppercase;
+          opacity: 0;
+          animation: fadeInText 1s ease 0.5s forwards;
+        }
+        @keyframes fadeInText {
+          to { opacity: 0.5; }
+        }
+      </style>
+      <div id="apple-loader">
+        <div class="apple-logo-placeholder">
+          <div class="apple-logo-inner">AC</div>
+        </div>
+        <div class="loading-bar-container">
+          <div class="loading-bar"></div>
+        </div>
+        <div class="loading-text">Loading Experience</div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

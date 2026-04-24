@@ -1,0 +1,401 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        (request.auth.token.email == "nemesis.developers.org@gmail.com" && request.auth.token.email_verified == true) ||
+        (request.auth.token.email == "xavierscot3454@gmail.com" && request.auth.token.email_verified == true) ||
+        (request.auth.token.email == "riseupacademysonai@gmail.com" && request.auth.token.email_verified == true) ||
+        (request.auth.token.email == "dcpromoidse@gmail.com" && request.auth.token.email_verified == true) || 
+        (request.auth.token.email == "helixsmith.xavy@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+    
+    function isModerator() {
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'moderator'
+      );
+    }
+
+    function isFaculty() {
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'faculty' ||
+          ('roles' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+           'faculty' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles)
+        )
+      );
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidString(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+
+    function isValidOptionalString(field, minLen, maxLen) {
+      return !(field in request.resource.data) ||
+        (request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser() {
+      return hasOnlyAllowedFields(['uid', 'name', 'email', 'photoUrl', 'role', 'roles', 'bio', 'school', 'town', 'village', 'phone', 'socialHandle', 'lastSeen', 'status', 'createdAt', 'updatedAt']) &&
+        isValidString('uid', 1, 100) &&
+        isValidString('name', 1, 100) &&
+        isValidOptionalString('email', 0, 200) &&
+        isValidOptionalString('photoUrl', 0, 1000) &&
+        (!('roles' in request.resource.data) || request.resource.data.roles is list) &&
+        isValidOptionalString('bio', 0, 1000) &&
+        isValidOptionalString('school', 0, 200) &&
+        isValidOptionalString('town', 0, 100) &&
+        isValidOptionalString('village', 0, 100) &&
+        isValidOptionalString('phone', 0, 20) &&
+        isValidOptionalString('socialHandle', 0, 100) &&
+        isValidOptionalString('status', 1, 20);
+    }
+
+    function isValidMessage() {
+      return hasOnlyAllowedFields(['content', 'senderId', 'senderName', 'senderPhoto', 'senderRole', 'channelId', 'type', 'mediaUrl', 'mediaMetadata', 'isEdited', 'isDeleted', 'replyToId', 'replyPreview', 'deliveryState', 'reactions', 'createdAt', 'updatedAt']) &&
+        isValidString('content', 0, 10000) &&
+        isValidString('senderId', 1, 100) &&
+        isValidString('senderName', 1, 100) &&
+        isValidString('senderPhoto', 0, 1000) &&
+        isValidString('senderRole', 1, 50) &&
+        isValidString('channelId', 1, 100) &&
+        request.resource.data.type in ['text', 'image', 'file', 'system'] &&
+        isValidOptionalString('mediaUrl', 0, 1000) &&
+        isValidOptionalString('replyToId', 1, 100) &&
+        isValidOptionalString('deliveryState', 1, 20);
+    }
+
+    function isValidTypingIndicator() {
+      return hasOnlyAllowedFields(['userId', 'userName', 'lastTypedAt']) &&
+        isValidString('userId', 1, 100) &&
+        isValidString('userName', 1, 100);
+    }
+
+    function isValidStorageProject() {
+      return hasOnlyAllowedFields(['id', 'name', 'config', 'status', 'currentUsageBytes', 'maxCapacityBytes', 'priority', 'lastActivity', 'createdAt', 'updatedAt']) &&
+        isValidString('id', 1, 100) &&
+        isValidString('name', 1, 100) &&
+        request.resource.data.status in ['active', 'running', 'full', 'disabled', 'maintenance'] &&
+        request.resource.data.currentUsageBytes is number &&
+        request.resource.data.maxCapacityBytes is number &&
+        request.resource.data.priority is number;
+    }
+
+    function isValidBranding() {
+      return hasOnlyAllowedFields(['title', 'logo', 'upiId', 'qrCodeUrl', 'starTitle', 'metaPixelCode', 'navOrder', 'updatedAt']) &&
+        isValidString('title', 1, 100) &&
+        isValidString('logo', 0, 1000) &&
+        isValidOptionalString('upiId', 0, 100) &&
+        isValidOptionalString('qrCodeUrl', 0, 1000) &&
+        isValidOptionalString('starTitle', 0, 200) &&
+        isValidOptionalString('metaPixelCode', 0, 5000) &&
+        (!('navOrder' in request.resource.data) || request.resource.data.navOrder is list);
+    }
+
+    function isValidRoutine() {
+      return hasOnlyAllowedFields(['time', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'createdAt', 'updatedAt']) &&
+        isValidString('time', 1, 100);
+    }
+
+    function isValidRadar() {
+      return hasOnlyAllowedFields(['title', 'time', 'status', 'link', 'createdAt', 'updatedAt']) &&
+        isValidString('title', 1, 200) &&
+        isValidString('time', 1, 100) &&
+        request.resource.data.status in ['live', 'upcoming', 'ended'];
+    }
+
+    function isValidBatch() {
+      return hasOnlyAllowedFields(['name', 'date', 'description', 'color', 'tag', 'tagColor', 'createdAt', 'updatedAt', 'timerEnabled', 'targetDate', 'capacity', 'showProgressBar', 'waitlistMessage', 'enrollmentStatus']) &&
+        isValidString('name', 1, 100) &&
+        isValidOptionalString('date', 0, 100) &&
+        isValidOptionalString('description', 0, 2000);
+    }
+
+    function isValidFee() {
+      return hasOnlyAllowedFields(['subject', 'originalPrice', 'discount', 'finalPrice', 'grade', 'grades', 'createdAt', 'updatedAt']) &&
+        isValidString('subject', 1, 100) &&
+        isValidOptionalString('grade', 0, 50) &&
+        (!('grades' in request.resource.data) || request.resource.data.grades is list) &&
+        request.resource.data.originalPrice is number &&
+        request.resource.data.finalPrice is number;
+    }
+
+    function isValidDownload() {
+      return hasOnlyAllowedFields(['subject', 'icon', 'color', 'links', 'createdAt', 'updatedAt']) &&
+        isValidString('subject', 1, 100) &&
+        request.resource.data.links is list;
+    }
+
+    function isValidEnrollment() {
+      return hasOnlyAllowedFields(['name', 'email', 'phone', 'whatsapp', 'grade', 'subjects', 'totalFee', 'discount', 'status', 'paymentHistory', 'notes', 'instagram', 'feeStatus', 'createdAt', 'updatedAt']) &&
+        isValidString('name', 1, 100) &&
+        isValidOptionalString('email', 0, 200) &&
+        isValidOptionalString('phone', 0, 20) &&
+        isValidOptionalString('whatsapp', 0, 20) &&
+        isValidString('grade', 1, 50) &&
+        (!( 'subjects' in request.resource.data ) || request.resource.data.subjects is list);
+    }
+
+    function isValidChannelConfig() {
+      return hasOnlyAllowedFields(['id', 'name', 'iconName', 'description', 'permissions', 'order', 'createdAt', 'updatedAt']) &&
+        isValidString('id', 1, 100) &&
+        isValidString('name', 1, 100) &&
+        isValidString('iconName', 1, 100) &&
+        isValidString('description', 0, 1000) &&
+        request.resource.data.permissions is map &&
+        request.resource.data.order is number;
+    }
+
+    function isValidTeaser() {
+      return hasOnlyAllowedFields(['question', 'options', 'correctAnswer', 'explanation', 'createdAt', 'updatedAt']) &&
+        isValidString('question', 1, 2000) &&
+        request.resource.data.options is list &&
+        request.resource.data.correctAnswer is number;
+    }
+
+    function isValidDrop() {
+      return hasOnlyAllowedFields(['title', 'content', 'type', 'expiresAt', 'fileUrl', 'externalUrl', 'createdAt', 'updatedAt']) &&
+        isValidString('title', 1, 200) &&
+        isValidOptionalString('content', 0, 2000) &&
+        isValidOptionalString('fileUrl', 0, 1000) &&
+        isValidOptionalString('externalUrl', 0, 1000) &&
+        request.resource.data.type in ['tip', 'formula', 'fact', 'announcement', 'text', 'video', 'image', 'pdf', 'voice'];
+    }
+
+    function isValidStar() {
+      return hasOnlyAllowedFields(['name', 'achievement', 'week', 'image', 'createdAt', 'updatedAt']) &&
+        isValidString('name', 1, 100) &&
+        isValidString('achievement', 1, 500) &&
+        isValidString('week', 1, 100);
+    }
+
+    function canViewChannel(channelId) {
+      return exists(/databases/$(database)/documents/channels_config/$(channelId)) && (
+        isAdmin() || isModerator() ||
+        (
+          get(/databases/$(database)/documents/channels_config/$(channelId)).data.get('isSupportTicket', false) == true &&
+          get(/databases/$(database)/documents/channels_config/$(channelId)).data.get('ticketOwnerId', '') == request.auth.uid
+        ) ||
+        (
+          isAuthenticated() && 
+          get(/databases/$(database)/documents/channels_config/$(channelId)).data.permissions.users.keys().hasAll([request.auth.uid]) && 
+          'view' in get(/databases/$(database)/documents/channels_config/$(channelId)).data.permissions.users[request.auth.uid] ?
+          get(/databases/$(database)/documents/channels_config/$(channelId)).data.permissions.users[request.auth.uid].view :
+          (
+            get(/databases/$(database)/documents/channels_config/$(channelId)).data.permissions.roles.keys().hasAll([(isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid))) ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : 'student']) && 
+            'view' in get(/databases/$(database)/documents/channels_config/$(channelId)).data.permissions.roles[(isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid))) ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : 'student'] ?
+            get(/databases/$(database)/documents/channels_config/$(channelId)).data.permissions.roles[(isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid))) ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : 'student'].view :
+            (
+              get(/databases/$(database)/documents/channels_config/$(channelId)).data.permissions.roles.keys().hasAll(['everyone']) && 
+              'view' in get(/databases/$(database)/documents/channels_config/$(channelId)).data.permissions.roles.everyone ?
+              get(/databases/$(database)/documents/channels_config/$(channelId)).data.permissions.roles.everyone.view : false
+            )
+          )
+        )
+      );
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // Public Access Rules
+    match /enrollments/{enrollmentId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidEnrollment();
+      allow update: if isAuthenticated() && isValidEnrollment() && (isAdmin() || resource.data.email == request.auth.token.email);
+      allow delete: if isAdmin();
+    }
+
+    match /batches/{batchId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /routines/{routineId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /fees/{feeId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /downloads/{downloadId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /radars/{radarId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /teasers/{teaserId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /drops/{dropId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /stars/{starId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /error_logs/{logId} {
+      allow create: if true; // Let even anonymous/unauthenticated users log errors initially
+      allow read, delete: if isAdmin() || (isAuthenticated() && resource.data.authInfo.userId == request.auth.uid);
+    }
+
+    match /admin/branding {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /channels_config/{channelId} {
+      allow read: if true;
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.isSupportTicket == true && request.resource.data.ticketOwnerId == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    match /batchFaculty/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    match /attendance/{id} { 
+      allow read: if isAdmin() || isFaculty(); 
+      allow write: if isAdmin() || isFaculty(); 
+    }
+    
+    match /faculty_attendance/{id} { 
+      allow read: if true; 
+      allow create: if isAdmin() || (isFaculty() && request.resource.data.userId == request.auth.uid);
+      allow update: if isAdmin() || (isFaculty() && resource.data.userId == request.auth.uid);
+      allow delete: if isAdmin() || (isFaculty() && resource.data.userId == request.auth.uid);
+    }
+
+    match /payouts/{id} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /finance_ledger/{id} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /payout_requests/{id} {
+      allow read: if true;
+      allow create: if isFaculty() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin() || (isFaculty() && resource.data.userId == request.auth.uid);
+      allow delete: if isAdmin() || (isFaculty() && resource.data.userId == request.auth.uid);
+    }
+
+    match /faculty_salaries/{id} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /resignations/{id} {
+      allow read: if true;
+      allow create: if isFaculty() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin() || (isFaculty() && resource.data.userId == request.auth.uid);
+      allow delete: if isAdmin() || (isFaculty() && resource.data.userId == request.auth.uid);
+    }
+
+    match /activity/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /course_folders/{id} { allow read: if true; allow write: if isAdmin() || isFaculty(); }
+    match /exclusive_content/{id} { allow read: if true; allow write: if isAdmin() || isFaculty(); }
+    match /socialLinks/{id} { allow read: if true; allow write: if isAdmin(); }
+
+    match /_health/{document} {
+      allow read: if true;
+    }
+
+    // Protected Access Rules
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser() && (
+        request.resource.data.role == 'student' || isAdmin()
+      );
+      allow update: if isAuthenticated() && isValidUser() && (
+        (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /channels/{channelId}/messages/{messageId} {
+      allow read: if canViewChannel(channelId);
+      allow create: if isAuthenticated() && isValidMessage() && (request.resource.data.senderId == request.auth.uid || isAdmin()) && canViewChannel(channelId);
+      allow update: if isAuthenticated() && isValidMessage() && (
+        (request.resource.data.senderId == resource.data.senderId && resource.data.senderId == request.auth.uid) ||
+        isAdmin() || isModerator()
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid || isAdmin() || isModerator()
+      );
+    }
+
+    match /channels/{channelId}/typing/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isOwner(userId) && isValidTypingIndicator();
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    match /admin/storage/projects/{projectId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidStorageProject();
+      allow update: if isAuthenticated() && isValidStorageProject() && (
+        isAdmin() || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentUsageBytes', 'lastActivity', 'status'])
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Global Read Access (Public) and Admin Write Access
+    match /{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

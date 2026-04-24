@@ -1,0 +1,549 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "admin", "moderator"] },
+        "bio": { "type": "string" },
+        "lastSeen": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["online", "offline"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email", "photoUrl", "role"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A chat message.",
+      "type": "object",
+      "properties": {
+        "content": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderPhoto": { "type": "string" },
+        "senderRole": { "type": "string" },
+        "channelId": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "image", "file", "system"] },
+        "mediaUrl": { "type": "string" },
+        "mediaMetadata": { "type": "object" },
+        "isEdited": { "type": "boolean" },
+        "isDeleted": { "type": "boolean" },
+        "isMarked": { "type": "boolean" },
+        "replyToId": { "type": "string" },
+        "replyPreview": { "type": "object" },
+        "deliveryState": { "type": "string" },
+        "reactions": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["content", "senderId", "senderName", "senderPhoto", "senderRole", "channelId", "type", "deliveryState", "createdAt"]
+    },
+    "TypingIndicator": {
+      "title": "TypingIndicator",
+      "description": "Indicates a user is typing.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "lastTypedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userName", "lastTypedAt"]
+    },
+    "StorageProject": {
+      "title": "StorageProject",
+      "description": "A storage project configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "config": { "type": "object" },
+        "status": { "type": "string", "enum": ["active", "running", "full", "disabled", "maintenance"] },
+        "currentUsageBytes": { "type": "number" },
+        "maxCapacityBytes": { "type": "number" },
+        "priority": { "type": "number" },
+        "lastActivity": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "config", "status", "currentUsageBytes", "maxCapacityBytes", "priority"]
+    },
+    "BrandingConfig": {
+      "title": "BrandingConfig",
+      "description": "App branding configuration.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "logo": { "type": "string" },
+        "upiId": { "type": "string" },
+        "qrCode": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "logo"]
+    },
+    "Routine": {
+      "title": "Routine",
+      "description": "Weekly class routine.",
+      "type": "object",
+      "properties": {
+        "startTime": { "type": "string", "description": "Start time (e.g. 02:30 PM)" },
+        "endTime": { "type": "string", "description": "End time (e.g. 04:30 PM)" },
+        "mon": { "type": "string" },
+        "tue": { "type": "string" },
+        "wed": { "type": "string" },
+        "thu": { "type": "string" },
+        "fri": { "type": "string" },
+        "sat": { "type": "string" },
+        "sun": { "type": "string" }
+      },
+      "required": ["startTime"]
+    },
+    "Radar": {
+      "title": "Radar",
+      "description": "Live class tracking.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["upcoming", "live", "canceled", "delayed", "completed"] },
+        "link": { "type": "string" },
+        "notes": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "image", "pdf", "video", "voice"] },
+        "fileUrl": { "type": "string" },
+        "externalUrl": { "type": "string" }
+      },
+      "required": ["title", "startTime", "date"]
+    },
+    "Batch": {
+      "title": "Batch",
+      "description": "Batch information.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "date": { "type": "string" },
+        "description": { "type": "string" },
+        "color": { "type": "string" },
+        "tag": { "type": "string" },
+        "tagColor": { "type": "string" }
+      },
+      "required": ["name", "date", "description"]
+    },
+    "Fee": {
+      "title": "Fee",
+      "description": "Fee structure.",
+      "type": "object",
+      "properties": {
+        "subject": { "type": "string" },
+        "originalPrice": { "type": "number" },
+        "discount": { "type": "number" },
+        "finalPrice": { "type": "number" }
+      },
+      "required": ["subject", "originalPrice", "finalPrice"]
+    },
+    "Download": {
+      "title": "Download",
+      "description": "Study materials.",
+      "type": "object",
+      "properties": {
+        "subject": { "type": "string" },
+        "icon": { "type": "string" },
+        "color": { "type": "string" },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "url": { "type": "string" },
+              "icon": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["subject", "links"]
+    },
+    "Enrollment": {
+      "title": "Enrollment",
+      "description": "Student enrollment record.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "grade": { "type": "string" },
+        "subjects": { "type": "array", "items": { "type": "string" } },
+        "totalFee": { "type": "number" },
+        "discount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "active", "suspended"] },
+        "paymentHistory": { "type": "array", "items": { "type": "object" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "phone", "grade", "subjects"]
+    },
+    "Teaser": {
+      "title": "Teaser",
+      "description": "Daily teaser question.",
+      "type": "object",
+      "properties": {
+        "question": { "type": "string" },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "correctAnswer": { "type": "number" },
+        "explanation": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["question", "options", "correctAnswer"]
+    },
+    "Drop": {
+      "title": "Drop",
+      "description": "Daily study drop.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["tip", "formula", "fact", "announcement"] },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "content", "type"]
+    },
+    "Star": {
+      "title": "Star",
+      "description": "Star of the week.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "achievement": { "type": "string" },
+        "week": { "type": "string" },
+        "image": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "achievement", "week"]
+    },
+    "ChannelConfig": {
+      "title": "ChannelConfig",
+      "description": "Chat channel configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "iconName": { "type": "string" },
+        "description": { "type": "string" },
+        "permissions": { "type": "object" },
+        "order": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "iconName", "permissions", "order"]
+    },
+    "Achiever": {
+      "title": "Achiever",
+      "description": "Top performing students.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "rank": { "type": "string" },
+        "percentage": { "type": "string" },
+        "grade": { "type": "string" },
+        "photo": { "type": "string" },
+        "year": { "type": "string" },
+        "achievement": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["name", "rank"]
+    },
+    "Faculty": {
+      "title": "Faculty",
+      "description": "Teaching staff information.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "degree": { "type": "string" },
+        "experience": { "type": "string" },
+        "achievement": { "type": "string" },
+        "photo": { "type": "string" },
+        "subjects": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "number" }
+      },
+      "required": ["name", "degree"]
+    },
+    "LandingConfig": {
+      "title": "LandingConfig",
+      "description": "Landing page dynamic content.",
+      "type": "object",
+      "properties": {
+        "heroTitle": { "type": "string" },
+        "heroSubtitle": { "type": "string" },
+        "stats": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string" },
+              "value": { "type": "string" }
+            }
+          }
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "icon": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "Resource": {
+      "title": "Resource",
+      "description": "A study resource in the vault.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "type": { "type": "string", "enum": ["pdf", "video", "link", "image"] },
+        "url": { "type": "string" },
+        "thumbnail": { "type": "string" },
+        "author": { "type": "string" },
+        "order": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "category", "type", "url"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "A global broadcast announcement.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["info", "warning", "urgent"] },
+        "isActive": { "type": "boolean" },
+        "targetAudience": { "type": "string" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "content", "type", "isActive"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Student attendance record.",
+      "type": "object",
+      "properties": {
+        "batchName": { "type": "string" },
+        "subject": { "type": "string" },
+        "date": { "type": "string" },
+        "records": { "type": "object", "description": "Map of studentId to status (present/absent)" },
+        "stats": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["batchName", "subject", "date", "records"]
+    },
+    "FacultyAttendance": {
+      "title": "FacultyAttendance",
+      "description": "Faculty daily presence log.",
+      "type": "object",
+      "properties": {
+        "facultyId": { "type": "string" },
+        "facultyName": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["present", "absent"] },
+        "isApproved": { "type": "boolean" },
+        "disapprovalReason": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["facultyId", "date", "status"]
+    },
+    "FacultySalary": {
+      "title": "FacultySalary",
+      "description": "Faculty salary configuration.",
+      "type": "object",
+      "properties": {
+        "facultyId": { "type": "string" },
+        "model": { "type": "string", "enum": ["monthly", "daily", "per_student"] },
+        "baseRate": { "type": "number" },
+        "paymentMethod": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["facultyId", "model", "baseRate"]
+    },
+    "Payout": {
+      "title": "Payout",
+      "description": "Salary payout record.",
+      "type": "object",
+      "properties": {
+        "facultyId": { "type": "string" },
+        "month": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["regular", "bonus", "advance"] },
+        "status": { "type": "string", "enum": ["pending", "processed", "rejected"] },
+        "processedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["facultyId", "month", "amount", "status"]
+    },
+    "Finance": {
+      "title": "Finance",
+      "description": "Financial transaction (Income/Expense).",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "date": { "type": "string" },
+        "studentId": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "category", "amount", "description", "date"]
+    },
+    "FinanceLedger": {
+      "title": "FinanceLedger",
+      "description": "Split ledger for institutional tracking.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "studentName": { "type": "string" },
+        "amountPaid": { "type": "number" },
+        "adminCut": { "type": "number" },
+        "facultyPool": { "type": "number" },
+        "enrollmentId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "studentName", "amountPaid", "adminCut", "facultyPool"]
+    },
+    "Resignation": {
+      "title": "Resignation",
+      "description": "Faculty resignation request.",
+      "type": "object",
+      "properties": {
+        "facultyId": { "type": "string" },
+        "facultyName": { "type": "string" },
+        "reason": { "type": "string" },
+        "lastWorkingDay": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["facultyId", "reason", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profiles."
+    },
+    "/channels/{channelId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Messages in a channel."
+    },
+    "/channels/{channelId}/typing/{userId}": {
+      "schema": { "$ref": "#/entities/TypingIndicator" },
+      "description": "Typing indicators in a channel."
+    },
+    "/channels_config/{channelId}": {
+      "schema": { "$ref": "#/entities/ChannelConfig" },
+      "description": "Chat channel configurations."
+    },
+    "/admin/storage/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/StorageProject" },
+      "description": "Storage projects."
+    },
+    "/admin/branding": {
+      "schema": { "$ref": "#/entities/BrandingConfig" },
+      "description": "Branding configuration."
+    },
+    "/admin/landing": {
+      "schema": { "$ref": "#/entities/LandingConfig" },
+      "description": "Landing page configuration."
+    },
+    "/achievers/{achieverId}": {
+      "schema": { "$ref": "#/entities/Achiever" },
+      "description": "Hall of fame achievers."
+    },
+    "/faculty/{facultyId}": {
+      "schema": { "$ref": "#/entities/Faculty" },
+      "description": "Teachers and staff."
+    },
+    "/routines/{routineId}": {
+      "schema": { "$ref": "#/entities/Routine" },
+      "description": "Class routines."
+    },
+    "/radars/{radarId}": {
+      "schema": { "$ref": "#/entities/Radar" },
+      "description": "Live class radars."
+    },
+    "/batches/{batchId}": {
+      "schema": { "$ref": "#/entities/Batch" },
+      "description": "Batches."
+    },
+    "/fees/{feeId}": {
+      "schema": { "$ref": "#/entities/Fee" },
+      "description": "Fee structure."
+    },
+    "/downloads/{downloadId}": {
+      "schema": { "$ref": "#/entities/Download" },
+      "description": "Downloads."
+    },
+    "/enrollments/{enrollmentId}": {
+      "schema": { "$ref": "#/entities/Enrollment" },
+      "description": "Enrollments."
+    },
+    "/teasers/{teaserId}": {
+      "schema": { "$ref": "#/entities/Teaser" },
+      "description": "Daily teasers."
+    },
+    "/drops/{dropId}": {
+      "schema": { "$ref": "#/entities/Drop" },
+      "description": "Daily study drops."
+    },
+    "/stars/{starId}": {
+      "schema": { "$ref": "#/entities/Star" },
+      "description": "Stars of the week."
+    },
+    "/resources/{resourceId}": {
+      "schema": { "$ref": "#/entities/Resource" },
+      "description": "Study resources."
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Global announcements."
+    },
+    "/attendance/{attendanceId}": {
+      "schema": { "$ref": "#/entities/Attendance" },
+      "description": "Student attendance."
+    },
+    "/faculty_attendance/{logId}": {
+      "schema": { "$ref": "#/entities/FacultyAttendance" },
+      "description": "Faculty attendance."
+    },
+    "/faculty_salaries/{facultyId}": {
+      "schema": { "$ref": "#/entities/FacultySalary" },
+      "description": "Faculty salary configurations."
+    },
+    "/payouts/{payoutId}": {
+      "schema": { "$ref": "#/entities/Payout" },
+      "description": "Salary payouts."
+    },
+    "/finances/{financeId}": {
+      "schema": { "$ref": "#/entities/Finance" },
+      "description": "Financial ledger."
+    },
+    "/finance_ledger/{ledgerId}": {
+      "schema": { "$ref": "#/entities/FinanceLedger" },
+      "description": "Split tracking."
+    },
+    "/resignations/{resignationId}": {
+      "schema": { "$ref": "#/entities/Resignation" },
+      "description": "Resignation requests."
+    }
+  }
+}
