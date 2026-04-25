@@ -15,8 +15,7 @@ import {
   Download,
   MessageSquare,
   Edit2,
-  Trash2,
-  CalendarOff
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { firestoreService } from '../services/firestoreService';
@@ -42,30 +41,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
   const [students, setStudents] = useState<any[]>([]);
   const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
   const [attendanceRecords, setAttendanceRecords] = useState<Record<string, 'present' | 'absent'>>({});
-  const [routines, setRoutines] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hasClassToday, setHasClassToday] = useState(true);
-
-  useEffect(() => {
-    if (!selectedBatch || routines.length === 0) {
-      setHasClassToday(true);
-      return;
-    }
-    const d = new Date(attendanceDate);
-    const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const currentDayStr = dayNames[d.getDay()];
-
-    const batchName = selectedBatch.name.toLowerCase();
-    
-    // Check if any routine for today includes the selected batch name
-    const hasRoutine = routines.some(r => {
-      const dayVal = r[currentDayStr];
-      if (!dayVal || dayVal === '-') return false;
-      return dayVal.toLowerCase().includes(batchName);
-    });
-
-    setHasClassToday(hasRoutine);
-  }, [selectedBatch, attendanceDate, routines]);
 
   const [batchFacultyRecords, setBatchFacultyRecords] = useState<any[]>([]);
   const [facultyAttendance, setFacultyAttendance] = useState<any[]>([]);
@@ -83,7 +59,10 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
 
   const [studentAttendance, setStudentAttendance] = useState<any[]>([]);
   const [reportTab, setReportTab] = useState<'faculty' | 'student'>('student');
-  const [reportDateRange, setReportDateRange] = useState<'today'|'yesterday'|'this_week'|'this_month'|'all'>('today');
+  const [reportDateRange, setReportDateRange] = useState<'day'|'weekly'|'monthly'|'yearly'|'range'|'all'>('day');
+  const [reportDay, setReportDay] = useState(new Date().toISOString().split('T')[0]);
+  const [reportFromDate, setReportFromDate] = useState(new Date(new Date().setDate(new Date().getDate() - 6)).toISOString().split('T')[0]);
+  const [reportToDate, setReportToDate] = useState(new Date().toISOString().split('T')[0]);
   const [messagingConfig, setMessagingConfig] = useState({ provider: 'whatsapp', apiKey: '', template: 'Hello {name}, your attendance is marked as {status} for {date}.' });
   const [showConfig, setShowConfig] = useState(false);
   const [allEnrollments, setAllEnrollments] = useState<any[]>([]);
@@ -135,21 +114,30 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
     const today = new Date();
     today.setHours(0,0,0,0);
     
-    if (reportDateRange === 'today') {
-      return d.getTime() === today.getTime();
+    if (reportDateRange === 'day') {
+      const selected = new Date(reportDay);
+      selected.setHours(0, 0, 0, 0);
+      return d.getTime() === selected.getTime();
     }
-    if (reportDateRange === 'yesterday') {
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      return d.getTime() === yesterday.getTime();
-    }
-    if (reportDateRange === 'this_week') {
+    if (reportDateRange === 'weekly') {
       const startOfWeek = new Date(today);
       startOfWeek.setDate(today.getDate() - today.getDay());
-      return d.getTime() >= startOfWeek.getTime();
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      return d.getTime() >= startOfWeek.getTime() && d.getTime() <= endOfWeek.getTime();
     }
-    if (reportDateRange === 'this_month') {
+    if (reportDateRange === 'monthly') {
       return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+    }
+    if (reportDateRange === 'yearly') {
+      return d.getFullYear() === today.getFullYear();
+    }
+    if (reportDateRange === 'range') {
+      const from = new Date(reportFromDate);
+      from.setHours(0, 0, 0, 0);
+      const to = new Date(reportToDate);
+      to.setHours(23, 59, 59, 999);
+      return d.getTime() >= from.getTime() && d.getTime() <= to.getTime();
     }
     return true; // fallback
   };
@@ -252,7 +240,6 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
   }, [studentAttendance]);
 
   useEffect(() => {
-    const unsubRoutines = firestoreService.listenToCollection('routines', setRoutines);
     const unsubBatches = firestoreService.listenToCollection('batches', (data) => {
       const filteredBatches = (isFaculty && !isAdmin) 
         ? data.filter(b => facultyBatches.some(fb => fb.batchId === b.id))
@@ -308,7 +295,6 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
     }
 
     return () => {
-      unsubRoutines();
       unsubBatches();
       unsubFacultyAttendance();
       unsubStudentAttendance();
@@ -866,29 +852,22 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                   <div className="text-xl font-black">{visibleStudents.length}</div>
                   <div className="text-[10px] opacity-40 uppercase font-black tracking-wider">Tgt Students</div>
                 </div>
-                {!hasClassToday ? (
-                  <div className="flex flex-col gap-2 w-full mt-4 items-center justify-center py-2 h-full opacity-50">
-                    <CalendarOff size={24} className="mb-2" />
-                    <span className="text-[10px] font-black uppercase tracking-wider">No Save Actions</span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2 w-full mt-4">
+                <div className="flex flex-col gap-2 w-full mt-4">
+                  <button 
+                    onClick={handleMarkAttendance}
+                    className="w-full px-6 py-3 bg-green-500 text-white rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:scale-105 transition-all"
+                  >
+                    {currentDayRecord ? 'UPDATE ALL' : 'SAVE ALL'}
+                  </button>
+                  {currentDayRecord && (
                     <button 
-                      onClick={handleMarkAttendance}
-                      className="w-full px-6 py-3 bg-green-500 text-white rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:scale-105 transition-all"
+                      onClick={handleDeleteAttendance}
+                      className="w-full px-6 py-2 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl font-black text-xs hover:bg-red-500 hover:text-white transition-all"
                     >
-                      {currentDayRecord ? 'UPDATE ALL' : 'SAVE ALL'}
+                      DELETE LOG ENTRY
                     </button>
-                    {currentDayRecord && (
-                      <button 
-                        onClick={handleDeleteAttendance}
-                        className="w-full px-6 py-2 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl font-black text-xs hover:bg-red-500 hover:text-white transition-all"
-                      >
-                        DELETE LOG ENTRY
-                      </button>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
 
@@ -954,16 +933,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                 )}
               </AnimatePresence>
 
-              {!hasClassToday ? (
-               <div className="p-12 flex flex-col justify-center items-center gap-4">
-                  <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
-                    <CalendarOff className="text-red-500" size={32} />
-                  </div>
-                  <h3 className="font-black italic text-xl">NO CLASS DAY</h3>
-                  <p className="text-white/50 text-sm">According to the routine, there are no classes scheduled for this batch today.</p>
-               </div>
-              ) : (
-                <div className="max-h-[600px] overflow-y-auto custom-scrollbar">
+              <div className="max-h-[600px] overflow-y-auto custom-scrollbar">
                   <table className="w-full text-left">
                     <thead className="bg-white/5 text-[10px] font-black uppercase opacity-40">
                       <tr>
@@ -1028,8 +998,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                     )}
                   </tbody>
                 </table>
-              </div>
-              )}
+                </div>
             </div>
           </motion.div>
         )}
@@ -1615,12 +1584,37 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                        onChange={(e) => setReportDateRange(e.target.value as any)}
                        className="p-2 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:border-indigo-500/50 transition-all rounded-xl outline-none text-sm font-bold [&>option]:bg-gray-900"
                      >
-                       <option value="today">Today</option>
-                       <option value="yesterday">Yesterday</option>
-                       <option value="this_week">This Week</option>
-                       <option value="this_month">This Month</option>
+                       <option value="day">Day Wise</option>
+                       <option value="weekly">Weekly</option>
+                       <option value="monthly">Monthly</option>
+                       <option value="yearly">Yearly</option>
+                       <option value="range">Between Dates</option>
                        <option value="all">All Time</option>
                      </select>
+                     {reportDateRange === 'day' && (
+                       <input
+                         type="date"
+                         value={reportDay}
+                         onChange={(e) => setReportDay(e.target.value)}
+                         className="p-2 bg-white/5 border border-white/10 rounded-xl outline-none text-sm font-bold"
+                       />
+                     )}
+                     {reportDateRange === 'range' && (
+                       <>
+                         <input
+                           type="date"
+                           value={reportFromDate}
+                           onChange={(e) => setReportFromDate(e.target.value)}
+                           className="p-2 bg-white/5 border border-white/10 rounded-xl outline-none text-sm font-bold"
+                         />
+                         <input
+                           type="date"
+                           value={reportToDate}
+                           onChange={(e) => setReportToDate(e.target.value)}
+                           className="p-2 bg-white/5 border border-white/10 rounded-xl outline-none text-sm font-bold"
+                         />
+                       </>
+                     )}
                      <select 
                        value={reportBatchFilter}
                        onChange={(e) => setReportBatchFilter(e.target.value)}

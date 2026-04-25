@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Moon, Sun, LogOut, Shield, Edit2, Check, X, MessageSquare, Image as ImageIcon, Camera, ZoomIn, Link as LinkIcon, Play, AlertTriangle } from 'lucide-react';
+import { User, Moon, Sun, LogOut, Shield, Edit2, Check, X, MessageCircle, HelpCircle, Image as ImageIcon, Camera, ZoomIn, Link as LinkIcon, Play, AlertTriangle } from 'lucide-react';
 import { authService, UserProfile } from '../services/authService';
 import { auth, db, storage } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -778,7 +778,7 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
                 >
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-[#25D366]/20 text-[#25D366] rounded-xl">
-                      <MessageSquare size={18} />
+                      <MessageCircle size={18} />
                     </div>
                     <div className="text-left">
                       <p className="font-bold text-[#25D366]">WhatsApp Support</p>
@@ -823,7 +823,7 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
                 >
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-indigo-500/20 text-indigo-500 rounded-xl">
-                      <MessageSquare size={18} />
+                      <HelpCircle size={18} />
                     </div>
                     <div className="text-left">
                       <p className="font-bold text-indigo-400">In-App Chat Support</p>

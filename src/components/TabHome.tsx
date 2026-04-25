@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { GraduationCap, MapPin, CalendarCheck, Phone, Calendar, ArrowRight, Radio, Brain, Zap, Star, CheckCircle2, Circle, Download, Play, Image as ImageIcon, FileText, Mic, ExternalLink, Moon, Sun, Clock, Instagram, MessageCircle } from 'lucide-react';
+import { GraduationCap, MapPin, CalendarCheck, Phone, Calendar, ArrowRight, Radio, Brain, Zap, Star, CheckCircle2, Circle, Download, Play, Image as ImageIcon, FileText, Mic, ExternalLink, Moon, Sun, Clock, Instagram, MessageCircle, Mail } from 'lucide-react';
 import EnrollmentSection from './EnrollmentSection';
 import CountdownTimer from './CountdownTimer';
 import { firestoreService } from '../services/firestoreService';
@@ -255,17 +255,19 @@ export default function TabHome({ onNavigate, branding, isDarkMode, toggleDarkMo
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-2xl mx-auto px-4">
+        <div className="w-full max-w-2xl mx-auto px-4 mb-4">
           <button 
             onClick={() => {
               window.dispatchEvent(new CustomEvent('open-enrollment'));
             }}
-            className="flex-1 inline-flex items-center justify-center gap-2.5 bg-gradient-to-br from-[var(--primary)] to-[var(--secondary)] text-white w-full py-4 px-6 rounded-2xl font-bold shadow-xl transition-all duration-200 border border-white/20 text-lg hover:scale-[1.03] active:scale-95"
+            className="inline-flex items-center justify-center gap-2.5 bg-gradient-to-br from-[var(--primary)] to-[var(--secondary)] text-white w-full py-4 px-6 rounded-2xl font-bold shadow-xl transition-all duration-200 border border-white/20 text-lg hover:scale-[1.03] active:scale-95"
           >
             <Zap size={24} className="fill-white" />
             Enroll Now
           </button>
-          
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-4xl mx-auto px-4">
           <a 
             href="tel:6001539070" 
             className="flex-1 inline-flex items-center justify-center gap-2.5 bg-gradient-to-br from-blue-600 to-blue-800 text-white w-full py-4 px-6 rounded-2xl font-bold shadow-lg transition-all duration-200 border border-white/20 text-lg hover:scale-[1.03] active:scale-95"
@@ -282,6 +284,14 @@ export default function TabHome({ onNavigate, branding, isDarkMode, toggleDarkMo
           >
             <MessageCircle size={24} />
             Join WhatsApp Group
+          </a>
+
+          <a
+            href={`mailto:${branding?.contactEmail || import.meta.env.VITE_ADMIN_EMAIL || 'support@advancedclasses.com'}`}
+            className="flex-1 inline-flex items-center justify-center gap-2.5 bg-gradient-to-br from-[#171823] to-[#090a10] text-white w-full py-4 px-6 rounded-2xl font-bold shadow-lg transition-all duration-200 border border-white/20 text-lg hover:scale-[1.03] active:scale-95"
+          >
+            <Mail size={24} />
+            Email
           </a>
         </div>
       </motion.header>
