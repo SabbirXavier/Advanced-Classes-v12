@@ -47,7 +47,6 @@ export default function SubjectCheckboxDropdown({ batchId, dynamicSubjects }: Su
         className="hidden"
         value={selectedSubjects}
         data-selected={JSON.stringify(selectedSubjects)}
-        readOnly
       >
         <option value="ALL">All Subjects</option>
         {dynamicSubjects.map(s => (
