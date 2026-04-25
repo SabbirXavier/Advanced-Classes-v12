@@ -252,20 +252,16 @@ export default function TabHome({ onNavigate, branding, isDarkMode, toggleDarkMo
             <p className="text-sm md:text-base font-semibold text-[var(--text-color)] opacity-80 mb-6 text-center max-w-xl">
               For HS 1st & 2nd Year <span className="mx-2 text-[var(--primary)]/50">|</span> NEET <span className="mx-2 text-[var(--primary)]/50">|</span> JEE Aspirants
             </p>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('open-enrollment'))}
+              className="inline-flex items-center justify-center gap-2.5 bg-gradient-to-r from-[#5B3CFF] to-[#6C4DFF] text-white px-10 py-3 rounded-2xl font-extrabold text-2xl shadow-[0_10px_30px_rgba(91,60,255,0.35)] hover:scale-[1.02] active:scale-95 transition-all"
+            >
+              Enroll Now <ArrowRight size={22} />
+            </button>
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-2xl mx-auto px-4">
-          <button 
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent('open-enrollment'));
-            }}
-            className="flex-1 inline-flex items-center justify-center gap-2.5 bg-gradient-to-br from-[var(--primary)] to-[var(--secondary)] text-white w-full py-4 px-6 rounded-2xl font-bold shadow-xl transition-all duration-200 border border-white/20 text-lg hover:scale-[1.03] active:scale-95"
-          >
-            <Zap size={24} className="fill-white" />
-            Enroll Now
-          </button>
-          
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-4xl mx-auto px-4">
           <a 
             href="tel:6001539070" 
             className="flex-1 inline-flex items-center justify-center gap-2.5 bg-gradient-to-br from-blue-600 to-blue-800 text-white w-full py-4 px-6 rounded-2xl font-bold shadow-lg transition-all duration-200 border border-white/20 text-lg hover:scale-[1.03] active:scale-95"

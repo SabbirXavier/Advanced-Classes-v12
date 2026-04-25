@@ -27,6 +27,7 @@ export default function TabAdmin({ branding }: { branding?: any }) {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeSection, setActiveSection] = useState('batches');
   const [user, setUser] = useState<any>(null);
+  const userData = user;
   
   const adminEmails = [
     (import.meta.env.VITE_ADMIN_EMAIL || 'xavierscot3454@gmail.com').toLowerCase(),
@@ -100,6 +101,7 @@ export default function TabAdmin({ branding }: { branding?: any }) {
   const [editingEnrollment, setEditingEnrollment] = useState<any>(null);
   const [verifyingPayment, setVerifyingPayment] = useState<any>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
   const [radarConfig, setRadarConfig] = useState<RadarConfig>({
     syncIntervalMinutes: 60,
     lastSyncAt: null,
@@ -125,6 +127,11 @@ export default function TabAdmin({ branding }: { branding?: any }) {
     } else {
       return `${year}-04-30`;
     }
+  };
+
+  const isTableExpanded = (key: string) => Boolean(expandedTables[key]);
+  const toggleTableExpanded = (key: string) => {
+    setExpandedTables((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   // Automatic Routine Sync & Cleanup
@@ -1589,6 +1596,8 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                 )
               );
               if (batchEnrollments.length === 0) return null;
+              const tableKey = `enrolled-${grade}`;
+              const visibleEnrollments = isTableExpanded(tableKey) ? batchEnrollments : batchEnrollments.slice(0, 3);
               return (
                 <div key={grade} className="border border-[var(--border-color)] rounded-xl overflow-hidden">
                   <div className="bg-[var(--primary)]/10 p-4 border-b border-[var(--border-color)] flex justify-between items-center">
@@ -1635,7 +1644,7 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--border-color)]">
-                        {batchEnrollments.map(student => (
+                        {visibleEnrollments.map(student => (
                           <tr key={student.id} className="hover:bg-white/5">
                             <td className="p-3 font-semibold">{student.name}</td>
                             <td className="p-3">
@@ -1679,6 +1688,16 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                       </tbody>
                     </table>
                   </div>
+                  {batchEnrollments.length > 3 && (
+                    <div className="px-4 py-3 border-t border-[var(--border-color)] bg-white/5 flex justify-center">
+                      <button
+                        onClick={() => toggleTableExpanded(tableKey)}
+                        className="text-xs font-bold px-3 py-1 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20"
+                      >
+                        {isTableExpanded(tableKey) ? 'Collapse' : `Expand (${batchEnrollments.length - 3} more)`}
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1719,8 +1738,8 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                       <th className="p-3 text-xs font-bold uppercase opacity-60 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {enrollments.map(student => {
+                <tbody>
+                    {(isTableExpanded('fees-verification') ? enrollments : enrollments.slice(0, 3)).map(student => {
                       const pendingPayments = (student.paymentHistory?.filter((p: any) => p.status === 'pending') || [])
                         .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
                       return (
@@ -1783,12 +1802,22 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                               {student.feeStatus === 'Paid' ? 'Mark Unpaid' : 'Verify Paid'}
                             </button>
                           </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                    </tr>
+                  );
+                })}
+                </tbody>
+              </table>
+              {enrollments.length > 3 && (
+                <div className="px-4 py-3 border-t border-[var(--border-color)] bg-white/5 flex justify-center">
+                  <button
+                    onClick={() => toggleTableExpanded('fees-verification')}
+                    className="text-xs font-bold px-3 py-1 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20"
+                  >
+                    {isTableExpanded('fees-verification') ? 'Collapse' : `Expand (${enrollments.length - 3} more)`}
+                  </button>
+                </div>
+              )}
+            </div>
             </div>
 
             {/* Subject Pricing Section */}
@@ -2222,13 +2251,15 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {enrollments
-                    .filter(s => s.feeStatus === 'Paid')
-                    .filter(s => 
-                      (s.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (s.email || '').toLowerCase().includes(searchQuery.toLowerCase())
-                    )
-                    .map((student, i) => (
+                  {(() => {
+                    const verifiedStudents = enrollments
+                      .filter(s => s.feeStatus === 'Paid')
+                      .filter(s =>
+                        (s.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        (s.email || '').toLowerCase().includes(searchQuery.toLowerCase())
+                      );
+                    const visibleVerified = isTableExpanded('verified-students') ? verifiedStudents : verifiedStudents.slice(0, 3);
+                    return visibleVerified.map((student, i) => (
                     <tr key={student.id || i} className="border-b border-[var(--border-color)] hover:bg-white/5 transition-colors">
                       <td className="p-3">
                         <div className="font-bold text-sm">{student.name}</div>
@@ -2261,12 +2292,33 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                  ))})()}
                 </tbody>
               </table>
-              {enrollments.filter(s => s.feeStatus === 'Paid').length === 0 && (
-                <div className="text-center py-10 opacity-50 font-bold">No verified students found.</div>
-              )}
+              {(() => {
+                const verifiedStudents = enrollments
+                  .filter(s => s.feeStatus === 'Paid')
+                  .filter(s =>
+                    (s.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (s.email || '').toLowerCase().includes(searchQuery.toLowerCase())
+                  );
+                if (verifiedStudents.length === 0) {
+                  return <div className="text-center py-10 opacity-50 font-bold">No verified students found.</div>;
+                }
+                if (verifiedStudents.length > 3) {
+                  return (
+                    <div className="px-4 py-3 border-t border-[var(--border-color)] bg-white/5 flex justify-center">
+                      <button
+                        onClick={() => toggleTableExpanded('verified-students')}
+                        className="text-xs font-bold px-3 py-1 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20"
+                      >
+                        {isTableExpanded('verified-students') ? 'Collapse' : `Expand (${verifiedStudents.length - 3} more)`}
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
         )}
@@ -2311,18 +2363,20 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {leads
-                    .filter(l => 
-                      (l.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (l.phone || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (l.email || '').toLowerCase().includes(searchQuery.toLowerCase())
-                    )
-                    .sort((a, b) => {
-                      const da = a.createdAt?.seconds || 0;
-                      const db = b.createdAt?.seconds || 0;
-                      return db - da; // Newest first
-                    })
-                    .map((lead, i) => (
+                  {(() => {
+                    const filteredLeads = leads
+                      .filter(l =>
+                        (l.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        (l.phone || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        (l.email || '').toLowerCase().includes(searchQuery.toLowerCase())
+                      )
+                      .sort((a, b) => {
+                        const da = a.createdAt?.seconds || 0;
+                        const db = b.createdAt?.seconds || 0;
+                        return db - da;
+                      });
+                    const visibleLeads = isTableExpanded('leads') ? filteredLeads : filteredLeads.slice(0, 3);
+                    return visibleLeads.map((lead, i) => (
                     <tr key={lead.id || i} className="border-b border-[var(--border-color)] hover:bg-white/5 transition-colors">
                       <td className="p-3">
                         <div className="text-xs font-bold">
@@ -2378,12 +2432,33 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                  ))})()}
                 </tbody>
               </table>
-              {leads.length === 0 && (
-                <div className="text-center py-10 opacity-50 font-bold">No leads found.</div>
-              )}
+              {(() => {
+                const filteredLeads = leads
+                  .filter(l =>
+                    (l.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (l.phone || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (l.email || '').toLowerCase().includes(searchQuery.toLowerCase())
+                  );
+                if (filteredLeads.length === 0) {
+                  return <div className="text-center py-10 opacity-50 font-bold">No leads found.</div>;
+                }
+                if (filteredLeads.length > 3) {
+                  return (
+                    <div className="px-4 py-3 border-t border-[var(--border-color)] bg-white/5 flex justify-center">
+                      <button
+                        onClick={() => toggleTableExpanded('leads')}
+                        className="text-xs font-bold px-3 py-1 rounded-lg bg-teal-500/15 text-teal-500 hover:bg-teal-500/25"
+                      >
+                        {isTableExpanded('leads') ? 'Collapse' : `Expand (${filteredLeads.length - 3} more)`}
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
         )}
