@@ -9,14 +9,14 @@ import {
   Clock, 
   Search,
   ChevronRight,
+  ChevronDown,
   Filter,
   AlertCircle,
   FileText,
   Download,
   MessageSquare,
   Edit2,
-  Trash2,
-  CalendarOff
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { firestoreService } from '../services/firestoreService';
@@ -42,30 +42,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
   const [students, setStudents] = useState<any[]>([]);
   const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
   const [attendanceRecords, setAttendanceRecords] = useState<Record<string, 'present' | 'absent'>>({});
-  const [routines, setRoutines] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hasClassToday, setHasClassToday] = useState(true);
-
-  useEffect(() => {
-    if (!selectedBatch || routines.length === 0) {
-      setHasClassToday(true);
-      return;
-    }
-    const d = new Date(attendanceDate);
-    const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const currentDayStr = dayNames[d.getDay()];
-
-    const batchName = selectedBatch.name.toLowerCase();
-    
-    // Check if any routine for today includes the selected batch name
-    const hasRoutine = routines.some(r => {
-      const dayVal = r[currentDayStr];
-      if (!dayVal || dayVal === '-') return false;
-      return dayVal.toLowerCase().includes(batchName);
-    });
-
-    setHasClassToday(hasRoutine);
-  }, [selectedBatch, attendanceDate, routines]);
 
   const [batchFacultyRecords, setBatchFacultyRecords] = useState<any[]>([]);
   const [facultyAttendance, setFacultyAttendance] = useState<any[]>([]);
@@ -83,7 +60,10 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
 
   const [studentAttendance, setStudentAttendance] = useState<any[]>([]);
   const [reportTab, setReportTab] = useState<'faculty' | 'student'>('student');
-  const [reportDateRange, setReportDateRange] = useState<'today'|'yesterday'|'this_week'|'this_month'|'all'>('today');
+  const [reportDateRange, setReportDateRange] = useState<'day'|'weekly'|'monthly'|'yearly'|'range'|'all'>('day');
+  const [reportDay, setReportDay] = useState(new Date().toISOString().split('T')[0]);
+  const [reportFromDate, setReportFromDate] = useState(new Date(new Date().setDate(new Date().getDate() - 6)).toISOString().split('T')[0]);
+  const [reportToDate, setReportToDate] = useState(new Date().toISOString().split('T')[0]);
   const [messagingConfig, setMessagingConfig] = useState({ provider: 'whatsapp', apiKey: '', template: 'Hello {name}, your attendance is marked as {status} for {date}.' });
   const [showConfig, setShowConfig] = useState(false);
   const [allEnrollments, setAllEnrollments] = useState<any[]>([]);
@@ -95,6 +75,9 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
   const [extraStudentMeta, setExtraStudentMeta] = useState<Record<string, {name: string; whatsapp?: string}>>({});
   const [showAddStudentForm, setShowAddStudentForm] = useState(false);
   const [newStudentData, setNewStudentData] = useState({ name: '', whatsapp: '' });
+  const [facultyReportSortBy, setFacultyReportSortBy] = useState<'date_desc' | 'date_asc' | 'name_asc' | 'name_desc' | 'status'>('date_desc');
+  const [showTodayFacultyExpanded, setShowTodayFacultyExpanded] = useState(false);
+  const [showYesterdayFacultyExpanded, setShowYesterdayFacultyExpanded] = useState(false);
 
   const facultyAssignedSubject = React.useMemo(() => {
     if (isAdmin || !isFaculty || !selectedBatch) return null;
@@ -110,6 +93,25 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
 
   const todayFaculty = facultyAttendance.filter(a => a.dateStr === todayDateStr && a.isApproved);
   const yesterdayFaculty = facultyAttendance.filter(a => a.dateStr === yesterdayDateStr && a.isApproved);
+  const sortedFacultyAttendance = React.useMemo(() => {
+    const sorted = [...facultyAttendance];
+    sorted.sort((a, b) => {
+      if (facultyReportSortBy === 'date_asc') {
+        return (a.date?.seconds || 0) - (b.date?.seconds || 0);
+      }
+      if (facultyReportSortBy === 'name_asc') {
+        return (a.userName || '').localeCompare(b.userName || '');
+      }
+      if (facultyReportSortBy === 'name_desc') {
+        return (b.userName || '').localeCompare(a.userName || '');
+      }
+      if (facultyReportSortBy === 'status') {
+        return Number(Boolean(a.isApproved)) - Number(Boolean(b.isApproved));
+      }
+      return (b.date?.seconds || 0) - (a.date?.seconds || 0);
+    });
+    return sorted;
+  }, [facultyAttendance, facultyReportSortBy]);
 
   useEffect(() => {
     if (facultyAssignedSubject && facultyAssignedSubject !== 'ALL') {
@@ -135,21 +137,30 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
     const today = new Date();
     today.setHours(0,0,0,0);
     
-    if (reportDateRange === 'today') {
-      return d.getTime() === today.getTime();
+    if (reportDateRange === 'day') {
+      const selected = new Date(reportDay);
+      selected.setHours(0, 0, 0, 0);
+      return d.getTime() === selected.getTime();
     }
-    if (reportDateRange === 'yesterday') {
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      return d.getTime() === yesterday.getTime();
-    }
-    if (reportDateRange === 'this_week') {
+    if (reportDateRange === 'weekly') {
       const startOfWeek = new Date(today);
       startOfWeek.setDate(today.getDate() - today.getDay());
-      return d.getTime() >= startOfWeek.getTime();
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      return d.getTime() >= startOfWeek.getTime() && d.getTime() <= endOfWeek.getTime();
     }
-    if (reportDateRange === 'this_month') {
+    if (reportDateRange === 'monthly') {
       return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+    }
+    if (reportDateRange === 'yearly') {
+      return d.getFullYear() === today.getFullYear();
+    }
+    if (reportDateRange === 'range') {
+      const from = new Date(reportFromDate);
+      from.setHours(0, 0, 0, 0);
+      const to = new Date(reportToDate);
+      to.setHours(23, 59, 59, 999);
+      return d.getTime() >= from.getTime() && d.getTime() <= to.getTime();
     }
     return true; // fallback
   };
@@ -252,7 +263,6 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
   }, [studentAttendance]);
 
   useEffect(() => {
-    const unsubRoutines = firestoreService.listenToCollection('routines', setRoutines);
     const unsubBatches = firestoreService.listenToCollection('batches', (data) => {
       const filteredBatches = (isFaculty && !isAdmin) 
         ? data.filter(b => facultyBatches.some(fb => fb.batchId === b.id))
@@ -308,7 +318,6 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
     }
 
     return () => {
-      unsubRoutines();
       unsubBatches();
       unsubFacultyAttendance();
       unsubStudentAttendance();
@@ -866,29 +875,22 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                   <div className="text-xl font-black">{visibleStudents.length}</div>
                   <div className="text-[10px] opacity-40 uppercase font-black tracking-wider">Tgt Students</div>
                 </div>
-                {!hasClassToday ? (
-                  <div className="flex flex-col gap-2 w-full mt-4 items-center justify-center py-2 h-full opacity-50">
-                    <CalendarOff size={24} className="mb-2" />
-                    <span className="text-[10px] font-black uppercase tracking-wider">No Save Actions</span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2 w-full mt-4">
+                <div className="flex flex-col gap-2 w-full mt-4">
+                  <button 
+                    onClick={handleMarkAttendance}
+                    className="w-full px-6 py-3 bg-green-500 text-white rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:scale-105 transition-all"
+                  >
+                    {currentDayRecord ? 'UPDATE ALL' : 'SAVE ALL'}
+                  </button>
+                  {currentDayRecord && (
                     <button 
-                      onClick={handleMarkAttendance}
-                      className="w-full px-6 py-3 bg-green-500 text-white rounded-xl font-black text-xs shadow-lg shadow-green-500/20 hover:scale-105 transition-all"
+                      onClick={handleDeleteAttendance}
+                      className="w-full px-6 py-2 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl font-black text-xs hover:bg-red-500 hover:text-white transition-all"
                     >
-                      {currentDayRecord ? 'UPDATE ALL' : 'SAVE ALL'}
+                      DELETE LOG ENTRY
                     </button>
-                    {currentDayRecord && (
-                      <button 
-                        onClick={handleDeleteAttendance}
-                        className="w-full px-6 py-2 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl font-black text-xs hover:bg-red-500 hover:text-white transition-all"
-                      >
-                        DELETE LOG ENTRY
-                      </button>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
 
@@ -954,16 +956,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                 )}
               </AnimatePresence>
 
-              {!hasClassToday ? (
-               <div className="p-12 flex flex-col justify-center items-center gap-4">
-                  <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
-                    <CalendarOff className="text-red-500" size={32} />
-                  </div>
-                  <h3 className="font-black italic text-xl">NO CLASS DAY</h3>
-                  <p className="text-white/50 text-sm">According to the routine, there are no classes scheduled for this batch today.</p>
-               </div>
-              ) : (
-                <div className="max-h-[600px] overflow-y-auto custom-scrollbar">
+              <div className="max-h-[600px] overflow-y-auto custom-scrollbar">
                   <table className="w-full text-left">
                     <thead className="bg-white/5 text-[10px] font-black uppercase opacity-40">
                       <tr>
@@ -1028,8 +1021,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                     )}
                   </tbody>
                 </table>
-              </div>
-              )}
+                </div>
             </div>
           </motion.div>
         )}
@@ -1449,7 +1441,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                       a.download = `student_attendance_${new Date().toISOString().split('T')[0]}.csv`;
                       a.click();
                     } else {
-                      const dataToExport = facultyAttendance;
+                      const dataToExport = sortedFacultyAttendance;
                       if (dataToExport.length === 0) return toast.error('No data to export');
                       let csv = 'Date,Faculty Name,Email,Status,Disapproval Reason\n' + dataToExport.map(r => `${r.dateStr},${r.userName},${r.userEmail},${r.isApproved ? 'Approved' : 'Disapproved'},${r.disapprovalReason || ''}`).join('\n');
                       const blob = new Blob([csv], { type: 'text/csv' });
@@ -1504,10 +1496,21 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
               <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                    <div className="glass-card p-6 border-l-4 border-emerald-500">
-                      <h4 className="text-xs font-black opacity-50 uppercase tracking-widest mb-4">Today's Present Faculties</h4>
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-xs font-black opacity-50 uppercase tracking-widest">Today's Present Faculties</h4>
+                        {todayFaculty.length > 5 && (
+                          <button
+                            onClick={() => setShowTodayFacultyExpanded(prev => !prev)}
+                            className="text-[10px] font-black uppercase px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 flex items-center gap-1"
+                          >
+                            {showTodayFacultyExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            {showTodayFacultyExpanded ? 'Collapse' : 'Expand'}
+                          </button>
+                        )}
+                      </div>
                       <div className="text-4xl font-black text-emerald-500 mb-2">{todayFaculty.length}</div>
                       <div className="space-y-2">
-                        {todayFaculty.map(f => (
+                        {(showTodayFacultyExpanded ? todayFaculty : todayFaculty.slice(0, 5)).map(f => (
                            <div key={`today-${f.id}`} className="text-xs flex justify-between bg-white/5 p-2 rounded">
                              <span className="font-bold">{f.userName}</span>
                              <span className="opacity-50">{new Date(f.date?.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
@@ -1517,10 +1520,21 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                       </div>
                    </div>
                    <div className="glass-card p-6 border-l-4 border-blue-500">
-                      <h4 className="text-xs font-black opacity-50 uppercase tracking-widest mb-4">Yesterday's Present Faculties</h4>
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-xs font-black opacity-50 uppercase tracking-widest">Yesterday's Present Faculties</h4>
+                        {yesterdayFaculty.length > 5 && (
+                          <button
+                            onClick={() => setShowYesterdayFacultyExpanded(prev => !prev)}
+                            className="text-[10px] font-black uppercase px-2 py-1 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 flex items-center gap-1"
+                          >
+                            {showYesterdayFacultyExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            {showYesterdayFacultyExpanded ? 'Collapse' : 'Expand'}
+                          </button>
+                        )}
+                      </div>
                       <div className="text-4xl font-black text-blue-500 mb-2">{yesterdayFaculty.length}</div>
                       <div className="space-y-2">
-                        {yesterdayFaculty.map(f => (
+                        {(showYesterdayFacultyExpanded ? yesterdayFaculty : yesterdayFaculty.slice(0, 5)).map(f => (
                            <div key={`yest-${f.id}`} className="text-xs flex justify-between bg-white/5 p-2 rounded">
                              <span className="font-bold">{f.userName}</span>
                              <span className="opacity-50">{new Date(f.date?.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
@@ -1535,6 +1549,19 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                  <h3 className="text-lg font-bold flex items-center gap-2 text-amber-500 mb-4">
                    <AlertCircle size={20} /> Faculty Attendance Moderation
                  </h3>
+                 <div className="mb-4 flex justify-end">
+                   <select
+                     value={facultyReportSortBy}
+                     onChange={(e) => setFacultyReportSortBy(e.target.value as any)}
+                     className="p-2 bg-white/5 border border-white/10 rounded-xl outline-none text-xs font-bold [&>option]:bg-gray-900"
+                   >
+                     <option value="date_desc">Sort: Date (Newest)</option>
+                     <option value="date_asc">Sort: Date (Oldest)</option>
+                     <option value="name_asc">Sort: Name (A-Z)</option>
+                     <option value="name_desc">Sort: Name (Z-A)</option>
+                     <option value="status">Sort: Status</option>
+                   </select>
+                 </div>
                  <div className="overflow-x-auto">
                    <table className="w-full text-left">
                      <thead className="text-[10px] font-black uppercase opacity-40">
@@ -1546,7 +1573,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                        </tr>
                      </thead>
                      <tbody className="divide-y divide-white/5 text-sm">
-                        {facultyAttendance.map(a => (
+                        {sortedFacultyAttendance.map(a => (
                           <tr key={a.id} className="hover:bg-white/5">
                             <td className="p-4">
                               <div className="font-bold">{a.userName}</div>
@@ -1590,7 +1617,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                             </td>
                           </tr>
                         ))}
-                        {facultyAttendance.length === 0 && (
+                        {sortedFacultyAttendance.length === 0 && (
                           <tr><td colSpan={4} className="p-10 text-center opacity-40 italic">No attendance records found yet.</td></tr>
                         )}
                      </tbody>
@@ -1615,12 +1642,37 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                        onChange={(e) => setReportDateRange(e.target.value as any)}
                        className="p-2 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:border-indigo-500/50 transition-all rounded-xl outline-none text-sm font-bold [&>option]:bg-gray-900"
                      >
-                       <option value="today">Today</option>
-                       <option value="yesterday">Yesterday</option>
-                       <option value="this_week">This Week</option>
-                       <option value="this_month">This Month</option>
+                       <option value="day">Day Wise</option>
+                       <option value="weekly">Weekly</option>
+                       <option value="monthly">Monthly</option>
+                       <option value="yearly">Yearly</option>
+                       <option value="range">Between Dates</option>
                        <option value="all">All Time</option>
                      </select>
+                     {reportDateRange === 'day' && (
+                       <input
+                         type="date"
+                         value={reportDay}
+                         onChange={(e) => setReportDay(e.target.value)}
+                         className="p-2 bg-white/5 border border-white/10 rounded-xl outline-none text-sm font-bold"
+                       />
+                     )}
+                     {reportDateRange === 'range' && (
+                       <>
+                         <input
+                           type="date"
+                           value={reportFromDate}
+                           onChange={(e) => setReportFromDate(e.target.value)}
+                           className="p-2 bg-white/5 border border-white/10 rounded-xl outline-none text-sm font-bold"
+                         />
+                         <input
+                           type="date"
+                           value={reportToDate}
+                           onChange={(e) => setReportToDate(e.target.value)}
+                           className="p-2 bg-white/5 border border-white/10 rounded-xl outline-none text-sm font-bold"
+                         />
+                       </>
+                     )}
                      <select 
                        value={reportBatchFilter}
                        onChange={(e) => setReportBatchFilter(e.target.value)}

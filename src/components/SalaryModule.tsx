@@ -22,9 +22,12 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 import { firestoreService } from '../services/firestoreService';
 import { db } from '../firebase';
-import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, setDoc, onSnapshot, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, setDoc, onSnapshot, Timestamp, deleteField } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 
 import { storageService } from '../services/storageService';
@@ -37,7 +40,7 @@ interface SalaryModuleProps {
 }
 
 export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches }: SalaryModuleProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'payouts' | 'student-payments'>(isAdmin ? 'settings' : 'overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'payouts' | 'student-payments' | 'admin-earnings'>(isAdmin ? 'settings' : 'overview');
   const [facultyList, setFacultyList] = useState<any[]>([]);
   const [facultySalaries, setFacultySalaries] = useState<any[]>([]);
   const [payouts, setPayouts] = useState<any[]>([]);
@@ -55,7 +58,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
   const [isRequestingPayout, setIsRequestingPayout] = useState(false);
   const [resignations, setResignations] = useState<any[]>([]);
   const [isAddingPayout, setIsAddingPayout] = useState(false);
-  const [payoutForm, setPayoutForm] = useState({ userId: '', amount: '', transactionId: '', note: '' });
+  const [payoutForm, setPayoutForm] = useState({ userId: '', amount: '', transactionId: '', note: '', method: 'upi', periodMonth: new Date().toISOString().slice(0, 7) });
   
   // Faculty Custom Payment Edit & Wrapped
   const [isEditingPayment, setIsEditingPayment] = useState(false);
@@ -63,11 +66,33 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
   const [paymentBank, setPaymentBank] = useState('');
   const [showWrapped, setShowWrapped] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0,7));
+  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
+  const [attendanceModal, setAttendanceModal] = useState<{ open: boolean; facultyId: string; facultyName: string; month: string }>({ open: false, facultyId: '', facultyName: '', month: '' });
+  const [adminAttendanceEdit, setAdminAttendanceEdit] = useState({ totalClassDays: 0, presentDays: 0, absentDays: 0 });
+  const [adminAttendanceEditMode, setAdminAttendanceEditMode] = useState(false);
+  const [isResettingAttendance, setIsResettingAttendance] = useState(false);
 
   const facultyManagedBatches = useMemo(() => 
     facultyBatches.filter(fb => fb.userId === user.uid || fb.email === user.email),
     [facultyBatches, user.uid, user.email]
   );
+  const monthNames = useMemo(() => [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ], []);
+  const yearOptions = useMemo(() => {
+    const y = new Date().getFullYear();
+    return Array.from({ length: 8 }, (_, i) => y - 5 + i);
+  }, []);
+  const getMonthParts = (value: string) => {
+    const [year, month] = value.split('-');
+    return { year: Number(year), monthIndex: Math.max(0, Number(month || 1) - 1) };
+  };
+  const updateMonthValue = (value: string, year: number, monthIndex: number) => {
+    const next = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+    if (value === selectedMonth) setSelectedMonth(next);
+    if (value === studentStatusMonth) setStudentStatusMonth(next);
+  };
 
   const handleShareWrapped = async () => {
     const el = document.getElementById('faculty-wrapped-card');
@@ -88,15 +113,20 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
 
   const [financeLedgers, setFinanceLedgers] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
+  const [monthlyFeeLedger, setMonthlyFeeLedger] = useState<any[]>([]);
+  const [studentStatusMonth, setStudentStatusMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [adminSelectedFacultyId, setAdminSelectedFacultyId] = useState('');
 
   useEffect(() => {
     let unsubSalaries = () => {};
     let unsubPayouts = () => {};
     let unsubAttendance = () => {};
+    let unsubAttendanceRecords = () => {};
     let unsubEnrollments = () => {};
     let unsubResignations = () => {};
     let unsubLedger = () => {};
     let unsubRequests = () => {};
+    let unsubMonthlyLedger = () => {};
 
     if (isAdmin) {
       unsubSalaries = firestoreService.listenToCollection('faculty_salaries', (data) => {
@@ -111,6 +141,9 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       unsubAttendance = firestoreService.listenToCollection('faculty_attendance', (data) => {
         setAttendance(data);
       });
+      unsubAttendanceRecords = firestoreService.listenToCollection('attendance_records', (data) => {
+        setAttendanceRecords(data);
+      });
       unsubEnrollments = firestoreService.listenToCollection('enrollments', (data) => {
         setEnrollments(data);
       });
@@ -121,6 +154,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       unsubRequests = firestoreService.listenToCollection('payout_requests', (data) => {
         setRequests(data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
       });
+      unsubMonthlyLedger = firestoreService.listenToCollection('student_monthly_fee_ledger', setMonthlyFeeLedger);
 
       const fetchFaculty = async () => {
          try {
@@ -140,7 +174,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       fetchFaculty();
     } else if (isFaculty) {
       unsubSalaries = onSnapshot(query(collection(db, 'faculty_salaries'), where('userId', '==', user.uid)), (snap) => {
-        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const data: any[] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setFacultySalaries(data);
         setMySalaryInfo(data.find(s => s.userId === user.uid));
       }, (err) => console.warn(err));
@@ -151,6 +185,10 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       unsubAttendance = onSnapshot(query(collection(db, 'faculty_attendance'), where('userId', '==', user.uid)), (snap) => {
         const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setAttendance(data);
+      }, (err) => console.warn(err));
+      unsubAttendanceRecords = onSnapshot(query(collection(db, 'attendance_records'), where('facultyId', '==', user.uid)), (snap) => {
+        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setAttendanceRecords(data);
       }, (err) => console.warn(err));
       unsubEnrollments = firestoreService.listenToCollection('enrollments', (data) => {
         setEnrollments(data);
@@ -163,6 +201,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
         const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setRequests(data.sort((a: any, b: any) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
       }, (err) => console.warn(err));
+      unsubMonthlyLedger = firestoreService.listenToCollection('student_monthly_fee_ledger', setMonthlyFeeLedger);
       // Ledger might need manual fetching if they own subjects, but right now they fetch none.
       // Admin will be needed to calculate balances properly, unless ledger read is opened up.
       // Setting ledger to empty for faculty.
@@ -175,48 +214,17 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       unsubSalaries();
       unsubPayouts();
       unsubAttendance();
+      unsubAttendanceRecords();
       unsubEnrollments();
       unsubResignations();
       unsubLedger();
       unsubRequests();
+      unsubMonthlyLedger();
     };
   }, [user.uid, isAdmin, isFaculty]);
 
-  const myBalance = useMemo(() => {
-    if (!isFaculty) return 0;
-    // Map finance ledgers where student is in faculty's assigned batches
-    const facultyManagedBatches = facultyBatches.filter(fb => fb.userId === user.uid || fb.email === user.email);
-    
-    // We don't filter them all out first. We calculate per ledger, per block.
-    // Ensure we avoid double counting if a faculty teaches multiple subjects in the same grade.
-    const totalEarnedFromSplits = financeLedgers.reduce((sum, l) => {
-       let blockEarnings = 0;
-       
-       facultyManagedBatches.forEach(fb => {
-          // Does this batch match the ledger's student enrollment?
-          if (fb.batchId === l.batchId || (fb.batchName === l.grade && (fb.subject === 'ALL' || l.subjects?.includes(fb.subject)))) {
-             // Use exact subject split if available
-             if (l.subjectSplits && l.subjectSplits[fb.subject]) {
-                blockEarnings += l.subjectSplits[fb.subject];
-             } else if (fb.subject === 'ALL') {
-                // If the faculty teaches ALL subjects for this grade, they get the full cut
-                blockEarnings += Number(l.facultyCut) || 0;
-             } else if (l.facultyCut && l.subjects?.length > 0) {
-                // Fallback equally if no explicit splits
-                blockEarnings += Math.floor(Number(l.facultyCut) / l.subjects.length);
-             }
-          }
-       });
-       return sum + blockEarnings;
-    }, 0);
-
-    const totalPaidOut = payouts.filter(p => p.userId === user.uid).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-
-    return totalEarnedFromSplits - totalPaidOut;
-  }, [financeLedgers, payouts, user.uid, facultyBatches, isFaculty]);
-
   const handlePayoutRequest = async () => {
-    if (myBalance <= 0) {
+    if (displayBalance <= 0) {
       toast.error('Insufficient balance for disbursement');
       return;
     }
@@ -224,7 +232,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       await addDoc(collection(db, 'payout_requests'), {
         userId: user.uid,
         userName: user.displayName || user.email,
-        amount: myBalance,
+        amount: displayBalance,
         status: 'pending',
         createdAt: serverTimestamp(),
         type: 'early_disbursement'
@@ -236,40 +244,134 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     }
   };
 
-  const calculateNetReceivable = (salaryInfo: any, currentAttendance: any[]) => {
-    if (!salaryInfo) return 0;
-    
-    // Filter approved attendance for this month
-    const monthApproved = currentAttendance.filter(a => 
-      a.userId === salaryInfo.userId && 
-      a.dateStr.startsWith(selectedMonth) && 
-      a.isApproved
-    );
-
-    const workingDays = monthApproved.length;
-    
-    if (salaryInfo.model === 'monthly') {
-      const parts = selectedMonth.split('-');
-      const year = parseInt(parts[0]);
-      const month = parseInt(parts[1]);
-      const fixedSalary = parseFloat(salaryInfo.baseAmount || 0);
-      const totalDaysInMonth = new Date(year, month, 0).getDate();
-      const dailyRate = fixedSalary / totalDaysInMonth;
-      return workingDays * dailyRate;
-    } else if (salaryInfo.model === 'daily') {
-      return workingDays * parseFloat(salaryInfo.baseAmount || 0);
-    } else if (salaryInfo.model === 'per_student') {
-      // Need to count paid students in assigned batches
-      const facultyAssignedBatches = facultyBatches.filter(fb => fb.userId === salaryInfo.userId);
-      const paidStudentsCount = enrollments.filter(e => 
-        e.feeStatus === 'Paid' && 
-        facultyAssignedBatches.some(fb => fb.batchName === e.batchName && fb.subject === e.subject)
-      ).length;
-      return (workingDays > 0 ? 1 : 0) * (paidStudentsCount * parseFloat(salaryInfo.perStudentRate || 0));
-    }
-    
-    return 0;
+  const getFacultyScopedStudents = (facultyId: string, month: string) => {
+    const monthEnd = new Date(`${month}-01`);
+    monthEnd.setMonth(monthEnd.getMonth() + 1);
+    monthEnd.setDate(0);
+    const batches = facultyBatches.filter(fb => fb.userId === facultyId);
+    return enrollments.filter((e) => {
+      const inAssigned = batches.some((fb) =>
+        (fb.batchId && fb.batchId === e.batchId) ||
+        (fb.batchName && fb.batchName === e.batchName) ||
+        (fb.subject === 'ALL' || (e.subjects || []).includes(fb.subject))
+      );
+      if (!inAssigned) return false;
+      const createdAtDate = e.createdAt?.seconds ? new Date(e.createdAt.seconds * 1000) : null;
+      if (!createdAtDate) return true;
+      return createdAtDate.getTime() <= monthEnd.getTime();
+    });
   };
+
+  const getAttendanceRowsForFacultyMonth = (facultyId: string, month: string) => {
+    if (!facultyId) return [];
+    if (attendanceRecords.length > 0) {
+      return attendanceRecords.filter((r) => {
+        const owner = r.facultyId || r.userId;
+        const dateStr = r.dateStr || (r.date ? String(r.date).slice(0, 10) : '');
+        return owner === facultyId && dateStr.startsWith(month);
+      });
+    }
+    return attendance.filter((r) => r.userId === facultyId && (r.dateStr || '').startsWith(month));
+  };
+
+  const getMonthlySalaryBreakdown = (salaryInfo: any, month: string, manualOverride?: { totalClassDays: number; presentDays: number; absentDays: number }) => {
+    if (!salaryInfo?.userId) {
+      return { presentDays: 0, classDays: 0, absentDays: 0, totalAssignedStudents: 0, paidStudentsCount: 0, unpaidStudentsCount: 0, earnedAmount: 0, pendingPotentialAmount: 0, fullPotentialAmount: 0 };
+    }
+
+    const attendanceRows = getAttendanceRowsForFacultyMonth(salaryInfo.userId, month);
+    const rawPresent = attendanceRows.filter((a: any) => {
+      const status = String(a.status || '').toLowerCase();
+      return a.isApproved || status === 'present' || status === 'late';
+    }).length;
+    const monthlyOverrides = salaryInfo.monthlyAttendanceOverrides?.[month] || {};
+    const presentDays = Number(manualOverride?.presentDays ?? monthlyOverrides.presentDays ?? rawPresent ?? 0);
+    const classDays = Number(manualOverride?.totalClassDays ?? monthlyOverrides.totalClassDays ?? (salaryInfo.totalClassDays || attendanceRows.length || 0));
+    const absentDays = Math.max(0, Number(manualOverride?.absentDays ?? monthlyOverrides.absentDays ?? (classDays - presentDays)));
+    const assignedStudents = getFacultyScopedStudents(salaryInfo.userId, month);
+    const assignedIds = new Set(assignedStudents.map((s: any) => s.id));
+    const monthLedger = monthlyFeeLedger.filter((l: any) => l.month === month && assignedIds.has(l.studentId));
+    const paidStudentsCount = monthLedger.filter((l: any) => Number(l.paidAmount || 0) > 0 || l.status === 'Paid').length;
+    const totalAssignedStudents = assignedStudents.length;
+    const unpaidStudentsCount = Math.max(0, totalAssignedStudents - paidStudentsCount);
+
+    const model = salaryInfo.model || 'monthly';
+    const rate = Number(salaryInfo.perStudentRate || salaryInfo.baseAmount || 0);
+    let earnedAmount = 0;
+    let pendingPotentialAmount = 0;
+    let fullPotentialAmount = 0;
+
+    if (model === 'monthly') {
+      const totalFixedSalary = Number(salaryInfo.baseAmount || 0);
+      earnedAmount = classDays > 0 ? (totalFixedSalary / classDays) * presentDays : 0;
+      fullPotentialAmount = earnedAmount;
+    } else if (model === 'daily') {
+      earnedAmount = Number(salaryInfo.baseAmount || 0) * presentDays;
+      fullPotentialAmount = earnedAmount;
+    } else {
+      const formulaMode = salaryInfo.perStudentFormulaMode || 'attendance_adjusted';
+      const rateType = salaryInfo.perStudentRateType || 'fixed';
+      fullPotentialAmount = classDays > 0 ? ((rate * totalAssignedStudents) / classDays) * presentDays : 0;
+      if (formulaMode === 'paid_student') {
+        if (rateType === 'percentage') {
+          earnedAmount = monthLedger.reduce((sum: number, l: any) => sum + ((Number(l.paidAmount || 0) * rate) / 100), 0);
+        } else {
+          earnedAmount = rate * paidStudentsCount;
+        }
+      } else {
+        earnedAmount = classDays > 0 ? ((rate * totalAssignedStudents) / classDays) * presentDays : 0;
+      }
+      pendingPotentialAmount = rateType === 'percentage'
+        ? 0
+        : Math.max(0, (rate * unpaidStudentsCount));
+    }
+
+    return { presentDays, classDays, absentDays, totalAssignedStudents, paidStudentsCount, unpaidStudentsCount, earnedAmount, pendingPotentialAmount, fullPotentialAmount };
+  };
+
+  const calculateNetReceivable = (salaryInfo: any, month: string) => {
+    const breakdown = getMonthlySalaryBreakdown(salaryInfo, month);
+    const monthPayouts = payouts
+      .filter((p) => p.userId === salaryInfo?.userId && (p.periodMonth || month) === month)
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const monthAdjustments = requests
+      .filter((r) => r.userId === salaryInfo?.userId && r.type === 'salary_adjustment' && r.periodMonth === month)
+      .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    return Math.max(0, breakdown.earnedAmount + monthAdjustments - monthPayouts);
+  };
+
+  const paidOutTotal = useMemo(
+    () => payouts.filter(p => p.userId === user.uid).reduce((sum, p) => sum + (Number(p.amount) || 0), 0),
+    [payouts, user.uid]
+  );
+  const isPerStudentModel = mySalaryInfo?.model === 'per_student';
+  const estimatedModelReceivable = useMemo(
+    () => calculateNetReceivable(mySalaryInfo, selectedMonth),
+    [mySalaryInfo, attendance, selectedMonth, payouts, monthlyFeeLedger, enrollments, facultyBatches, requests]
+  );
+  const myMonthBreakdown = useMemo(
+    () => getMonthlySalaryBreakdown(mySalaryInfo, selectedMonth),
+    [mySalaryInfo, selectedMonth, attendance, enrollments, monthlyFeeLedger, facultyBatches]
+  );
+  const selectedMonthLabel = useMemo(
+    () => new Date(`${selectedMonth}-01`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+    [selectedMonth]
+  );
+  const displayBalance = useMemo(() => {
+    return Math.max(0, estimatedModelReceivable);
+  }, [estimatedModelReceivable]);
+
+  useEffect(() => {
+    if (!adminSelectedFacultyId) return;
+    const salaryInfo = facultySalaries.find((s) => s.userId === adminSelectedFacultyId);
+    const breakdown = getMonthlySalaryBreakdown(salaryInfo, selectedMonth);
+    setAdminAttendanceEdit({
+      totalClassDays: breakdown.classDays || 0,
+      presentDays: breakdown.presentDays || 0,
+      absentDays: breakdown.absentDays || 0
+    });
+    setAdminAttendanceEditMode(false);
+  }, [adminSelectedFacultyId, selectedMonth, facultySalaries, attendance, attendanceRecords]);
 
   const saveSalarySettings = async (facId: string, data: any) => {
     try {
@@ -285,10 +387,117 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     }
   };
 
+  const saveMonthlyAttendanceOverride = async (facId: string, month: string, nextValues: { totalClassDays: number; presentDays: number; absentDays: number }, prevValues: { totalClassDays: number; presentDays: number; absentDays: number }) => {
+    if (!isAdmin) return;
+    try {
+      const docId = `salary_${facId}`;
+      await setDoc(doc(db, 'faculty_salaries', docId), {
+        userId: facId,
+        monthlyAttendanceOverrides: {
+          [month]: nextValues
+        },
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      await addDoc(collection(db, 'audit_logs'), {
+        action: 'faculty_monthly_attendance_override_updated',
+        facultyId: facId,
+        month,
+        oldValue: prevValues,
+        newValue: nextValues,
+        changedBy: user?.email || user?.uid || 'system',
+        timestamp: serverTimestamp()
+      });
+      toast.success('Attendance summary updated');
+    } catch (err) {
+      toast.error('Failed to update attendance summary');
+    }
+  };
+
+  const resetMonthlyAttendanceOverride = async (facId: string, month: string) => {
+    if (!isAdmin) return;
+    setIsResettingAttendance(true);
+    try {
+      const docId = `salary_${facId}`;
+      await updateDoc(doc(db, 'faculty_salaries', docId), {
+        [`monthlyAttendanceOverrides.${month}`]: deleteField(),
+        updatedAt: serverTimestamp()
+      });
+      await addDoc(collection(db, 'audit_logs'), {
+        action: 'faculty_monthly_attendance_override_reset',
+        facultyId: facId,
+        month,
+        changedBy: user?.email || user?.uid || 'system',
+        timestamp: serverTimestamp()
+      });
+      setAdminAttendanceEditMode(false);
+      toast.success('Reset to automatic attendance values');
+    } catch (err) {
+      toast.error('Failed to reset override');
+    } finally {
+      setIsResettingAttendance(false);
+    }
+  };
+
+  const normalizeAttendanceRow = (r: any) => {
+    const dateVal = r.dateStr || r.date || r.classDate || '-';
+    const batchVal = r.batchName || r.className || r.batch || r.batchId || '-';
+    const markedByVal = r.markedBy || r.markedByName || r.updatedBy || r.userName || r.teacherName || '-';
+    const ts = r.markedAt?.toDate?.()
+      || r.timestamp?.toDate?.()
+      || r.createdAt?.toDate?.()
+      || r.updatedAt?.toDate?.()
+      || null;
+    return {
+      date: dateVal,
+      subject: r.subject || r.subjectName || '-',
+      batch: batchVal,
+      status: r.status || (r.isApproved ? 'Present' : 'Absent'),
+      markedBy: markedByVal,
+      timestamp: ts ? ts.toLocaleString() : '-'
+    };
+  };
+
+  const exportAttendanceXlsx = (rows: any[], facultyName: string, month: string) => {
+    const exportRows = rows.map((r: any) => {
+      const n = normalizeAttendanceRow(r);
+      return {
+        Date: n.date,
+        Subject: n.subject,
+        Batch: n.batch,
+        Status: n.status,
+        MarkedBy: n.markedBy,
+        Timestamp: n.timestamp
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+    XLSX.writeFile(wb, `${facultyName.replace(/\s+/g, '_')}_${month}_attendance.xlsx`);
+  };
+
+  const exportAttendancePdf = (rows: any[], facultyName: string, month: string) => {
+    const pdf = new jsPDF({ orientation: 'landscape' });
+    pdf.setFontSize(12);
+    pdf.text(`Attendance Report - ${facultyName} (${month})`, 14, 12);
+    autoTable(pdf, {
+      startY: 18,
+      head: [['Date', 'Subject', 'Batch', 'Status', 'Marked By', 'Timestamp']],
+      body: rows.map((r: any) => {
+        const n = normalizeAttendanceRow(r);
+        return [n.date, n.subject, n.batch, n.status, n.markedBy, n.timestamp];
+      })
+    });
+    pdf.save(`${facultyName.replace(/\s+/g, '_')}_${month}_attendance.pdf`);
+  };
+
   const recordPayout = async (data: any) => {
     try {
       await addDoc(collection(db, 'payouts'), {
         ...data,
+        method: data.method || 'upi',
+        periodMonth: data.periodMonth || selectedMonth,
+        approvedBy: data.approvedBy || user.email || 'system',
+        approvedAt: serverTimestamp(),
         date: serverTimestamp(),
         createdAt: serverTimestamp()
       });
@@ -314,10 +523,8 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     setResignationFileProgress(0);
     const toastId = toast.loading('Uploading resignation letter...');
     try {
-      const { promise } = storageService.uploadFile(resignationFile, (url, name, progress) => {
-          if (progress !== undefined) {
-             setResignationFileProgress(progress);
-          }
+      const { promise } = storageService.uploadFile(resignationFile, (progress) => {
+          setResignationFileProgress(progress);
       });
       const uploadedFile = await promise;
 
@@ -347,6 +554,10 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       setResignationFileUploading(false);
     }
   };
+
+  const attendanceModalRows = attendanceModal.open
+    ? getAttendanceRowsForFacultyMonth(attendanceModal.facultyId, attendanceModal.month)
+    : [];
 
   return (
     <div className="space-y-6">
@@ -397,7 +608,15 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
               onClick={() => setActiveTab('student-payments')}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'student-payments' ? 'bg-[var(--primary)] text-white' : 'text-gray-500 hover:text-white'}`}
             >
-              Student Status
+              Student Fee Status
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('admin-earnings')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'admin-earnings' ? 'bg-[var(--primary)] text-white' : 'text-gray-500 hover:text-white'}`}
+            >
+              Earnings Monitor
             </button>
           )}
         </div>
@@ -413,31 +632,56 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                 <div className="absolute top-0 right-0 p-4 opacity-10">
                   <User size={80} />
                 </div>
-                <h3 className="font-bold text-lg mb-1 tracking-tight z-10">Student Fee Summary</h3>
-                <p className="text-xs opacity-70 z-10 mb-4">Tracking for your assigned batches</p>
-                <div className="flex gap-8 z-10">
-                  <div>
-                    <div className="text-4xl font-black text-green-500">
-                      {enrollments.filter(e => e.feeStatus === 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
+                {isPerStudentModel ? (
+                  <>
+                    <h3 className="font-bold text-lg mb-1 tracking-tight z-10">Student Fee Summary</h3>
+                    <p className="text-xs opacity-70 z-10 mb-4">Tracking for your assigned batches</p>
+                    <div className="flex gap-8 z-10">
+                      <div>
+                        <div className="text-4xl font-black text-green-500">
+                          {myMonthBreakdown.paidStudentsCount}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Paid ({selectedMonthLabel})</div>
+                      </div>
+                      <div>
+                        <div className="text-4xl font-black text-amber-500">
+                          {myMonthBreakdown.unpaidStudentsCount}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Pending ({selectedMonthLabel})</div>
+                      </div>
                     </div>
-                    <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Total Paid</div>
-                  </div>
-                  <div>
-                    <div className="text-4xl font-black text-amber-500">
-                      {enrollments.filter(e => e.feeStatus !== 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
+                  </>
+                ) : (
+                  <>
+                    <h3 className="font-bold text-lg mb-1 tracking-tight z-10">Attendance Salary Summary</h3>
+                    <p className="text-xs opacity-70 z-10 mb-4">Monthly/Per-day payout is attendance linked</p>
+                    <div className="flex gap-8 z-10">
+                      <div>
+                        <div className="text-4xl font-black text-green-500">
+                          {attendance.filter(a => a.userId === user.uid && a.isApproved && (a.dateStr || '').startsWith(selectedMonth)).length}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Present Days</div>
+                      </div>
+                      <div>
+                        <div className="text-4xl font-black text-blue-500">
+                          ₹{Math.round(estimatedModelReceivable).toLocaleString()}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Net Earned</div>
+                      </div>
                     </div>
-                    <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Pending</div>
-                  </div>
-                </div>
+                  </>
+                )}
               </div>
 
               <div className="glass-card p-6 bg-indigo-500/10 border-indigo-500/20">
-                <div className="text-[10px] uppercase font-black opacity-40 mb-1">Available Balance (50-50 Split)</div>
+                <div className="text-[10px] uppercase font-black opacity-40 mb-1">Available to Withdraw</div>
                 <div className="text-5xl font-black text-indigo-500 flex items-baseline gap-1 mt-2">
-                  ₹{Math.round(myBalance).toLocaleString()}
+                  ₹{Math.round(displayBalance).toLocaleString()}
                 </div>
                 <div className="mt-4 flex flex-col gap-1">
-                  <span className="text-[10px] opacity-60">Total earnings from paid enrollments</span>
+                  <span className="text-[10px] opacity-60">
+                    {isPerStudentModel ? `Monthly earnings for ${selectedMonthLabel}` : 'Attendance-linked monthly net earnings'}
+                  </span>
                   <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden mt-1">
                     <motion.div 
                       initial={{ width: 0 }} 
@@ -449,13 +693,83 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
               </div>
             </div>
 
+            {(() => {
+              const attendanceModeEnabled = mySalaryInfo?.model === 'per_student' && (mySalaryInfo?.perStudentFormulaMode || 'attendance_adjusted') === 'attendance_adjusted';
+              if (!attendanceModeEnabled) return null;
+              const salaryPaid = payouts
+                .filter((p) => p.userId === user.uid && (p.periodMonth || selectedMonth) === selectedMonth)
+                .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+              const balanceSalary = myMonthBreakdown.earnedAmount - salaryPaid;
+              return (
+                <>
+                  <div className="glass-card p-5">
+                    <div className="text-xs font-black uppercase opacity-50 mb-4">Attendance Summary</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="bg-white/5 rounded-xl p-3">
+                        <div className="text-[10px] opacity-60 uppercase">Total Class Days</div>
+                        <div className="text-2xl font-black mt-2">{myMonthBreakdown.classDays}</div>
+                      </div>
+                      <button onClick={() => setAttendanceModal({ open: true, facultyId: user.uid, facultyName: user.displayName || user.email || 'Faculty', month: selectedMonth })} className="bg-white/5 rounded-xl p-3 text-left hover:bg-white/10 transition-colors">
+                        <div className="text-[10px] opacity-60 uppercase">Present Days</div>
+                        <div className="text-2xl font-black mt-2 text-green-500">{myMonthBreakdown.presentDays}</div>
+                      </button>
+                      <div className="bg-white/5 rounded-xl p-3">
+                        <div className="text-[10px] opacity-60 uppercase">Absent Days</div>
+                        <div className="text-2xl font-black mt-2 text-amber-400">{myMonthBreakdown.absentDays}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="glass-card p-5">
+                    <div className="text-xs font-black uppercase opacity-50 mb-4">Salary Metrics</div>
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                      <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Full Potential</div><div className="font-black mt-1">₹{Math.round(myMonthBreakdown.fullPotentialAmount).toLocaleString()}</div></div>
+                      <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Earnings (Paid Students)</div><div className="font-black mt-1">₹{Math.round(myMonthBreakdown.earnedAmount).toLocaleString()}</div></div>
+                      <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Real-Time Earned</div><div className="font-black mt-1 text-green-400">₹{Math.round(myMonthBreakdown.earnedAmount).toLocaleString()}</div></div>
+                      <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Salary Paid</div><div className="font-black mt-1 text-blue-400">₹{Math.round(salaryPaid).toLocaleString()}</div></div>
+                      <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Balance Salary</div><div className={`font-black mt-1 ${balanceSalary < 0 ? 'text-amber-400' : 'text-indigo-400'}`}>₹{Math.round(Math.abs(balanceSalary)).toLocaleString()}</div><div className="text-[10px] opacity-60 mt-1">{balanceSalary < 0 ? 'Advance Paid to Faculty' : 'Pending balance'}</div></div>
+                    </div>
+                  </div>
+
+                  <div className="glass-card p-5">
+                    <div className="text-xs font-black uppercase opacity-50 mb-4">Student Stats</div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Total Students</div><div className="text-xl font-black">{myMonthBreakdown.totalAssignedStudents}</div></div>
+                      <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Paid Students</div><div className="text-xl font-black text-green-500">{myMonthBreakdown.paidStudentsCount}</div></div>
+                      <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Pending Students</div><div className="text-xl font-black text-amber-500">{myMonthBreakdown.unpaidStudentsCount}</div></div>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="glass-card p-6 bg-emerald-500/10 border-emerald-500/20">
                 <div className="text-[10px] uppercase font-black opacity-40 mb-1">Monthly Estimations</div>
-                <div className="text-3xl font-black text-emerald-500 mt-2">₹{Math.round(calculateNetReceivable(mySalaryInfo, attendance)).toLocaleString()}</div>
+                <div className="text-3xl font-black text-emerald-500 mt-2">₹{Math.round(calculateNetReceivable(mySalaryInfo, selectedMonth)).toLocaleString()}</div>
                 <div className="mt-4 flex items-center justify-between border-t border-emerald-500/20 pt-4">
-                  <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="text-[10px] p-1.5 bg-white/10 rounded outline-none border border-white/10 w-28" />
-                  <span className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded">{attendance.filter(a => a.userId === user.uid && a.isApproved && a.dateStr.startsWith(selectedMonth)).length} Present Days</span>
+                  <div className="flex gap-2">
+                    <select
+                      value={getMonthParts(selectedMonth).year}
+                      onChange={(e) => updateMonthValue(selectedMonth, Number(e.target.value), getMonthParts(selectedMonth).monthIndex)}
+                      className="text-[10px] p-1.5 bg-white/10 rounded outline-none border border-white/10"
+                    >
+                      {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <select
+                      value={getMonthParts(selectedMonth).monthIndex}
+                      onChange={(e) => updateMonthValue(selectedMonth, getMonthParts(selectedMonth).year, Number(e.target.value))}
+                      className="text-[10px] p-1.5 bg-white/10 rounded outline-none border border-white/10"
+                    >
+                      {monthNames.map((name, idx) => <option key={name} value={idx}>{name}</option>)}
+                    </select>
+                  </div>
+                  <button
+                    onClick={() => setAttendanceModal({ open: true, facultyId: user.uid, facultyName: user.displayName || user.email || 'Faculty', month: selectedMonth })}
+                    className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded hover:bg-emerald-500/20"
+                  >
+                    {myMonthBreakdown.presentDays} Present Days
+                  </button>
                 </div>
               </div>
               
@@ -475,10 +789,10 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                    </div>
                 </div>
                 <button 
-                  disabled={myBalance <= 0}
+                  disabled={displayBalance <= 0}
                   onClick={() => setIsRequestingPayout(true)}
                   className={`mt-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                    myBalance > 0 
+                    displayBalance > 0 
                     ? 'bg-indigo-500 text-white hover:scale-105 shadow-xl hover:shadow-indigo-500/20' 
                     : 'bg-white/5 text-gray-500 cursor-not-allowed'
                   }`}
@@ -519,7 +833,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                     <h3 className="text-xl font-black italic">REQUEST DISBURSEMENT</h3>
                     <div className="p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20">
                       <div className="text-[10px] font-black uppercase opacity-40 mb-1">Disbursable Amount</div>
-                      <div className="text-3xl font-black text-indigo-500">₹{Math.round(myBalance).toLocaleString()}</div>
+                      <div className="text-3xl font-black text-indigo-500">₹{Math.round(displayBalance).toLocaleString()}</div>
                       <p className="text-[10px] opacity-60 mt-2">This request will be processed within 24-48 hours after admin review.</p>
                     </div>
                     <div className="space-y-4">
@@ -529,7 +843,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                       </div>
                       <div className="flex items-center justify-between text-base font-black border-t border-white/10 pt-4">
                         <span>Net Payout:</span>
-                        <span className="text-indigo-400">₹{Math.round(myBalance).toLocaleString()}</span>
+                        <span className="text-indigo-400">₹{Math.round(displayBalance).toLocaleString()}</span>
                       </div>
                     </div>
                     <button 
@@ -593,7 +907,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                          <div className="space-y-1">
                             <label className="text-[8px] font-black uppercase opacity-40 pl-1">Salary Model</label>
                             <select 
@@ -624,16 +938,50 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                               className="w-full p-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold"
                             />
                          </div>
+                         <div className="space-y-1">
+                            <label className="text-[8px] font-black uppercase opacity-40 pl-1">Class Days / Month</label>
+                            <input
+                              type="number"
+                              value={salary?.totalClassDays || ''}
+                              onChange={(e) => saveSalarySettings(faculty.id, { totalClassDays: e.target.value })}
+                              className="w-full p-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold"
+                            />
+                         </div>
+                         <div className="space-y-1">
+                            <label className="text-[8px] font-black uppercase opacity-40 pl-1">Per Student Formula</label>
+                            <select
+                              value={salary?.perStudentFormulaMode || 'attendance_adjusted'}
+                              onChange={(e) => saveSalarySettings(faculty.id, { perStudentFormulaMode: e.target.value })}
+                              className="w-full p-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold"
+                            >
+                              <option value="attendance_adjusted">Attendance Adjusted</option>
+                              <option value="paid_student">Paid Student Direct</option>
+                            </select>
+                         </div>
+                         <div className="space-y-1">
+                            <label className="text-[8px] font-black uppercase opacity-40 pl-1">Rate Type</label>
+                            <select
+                              value={salary?.perStudentRateType || 'fixed'}
+                              onChange={(e) => saveSalarySettings(faculty.id, { perStudentRateType: e.target.value })}
+                              className="w-full p-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold"
+                            >
+                              <option value="fixed">Fixed ₹</option>
+                              <option value="percentage">Percentage %</option>
+                            </select>
+                         </div>
                          <div className="flex items-end">
                             <button 
                               onClick={() => {
-                                const amount = calculateNetReceivable(salary, attendance);
+                                const amount = calculateNetReceivable(salary, selectedMonth);
                                 const confirm = window.confirm(`Generate payout of ₹${Math.round(amount)} for ${faculty.name}?`);
                                 if (confirm) {
                                   recordPayout({
                                     userId: faculty.id,
                                     userName: faculty.name,
                                     amount: Math.round(amount),
+                                    periodMonth: selectedMonth,
+                                    method: 'manual',
+                                    approvedBy: user.email,
                                     note: `Auto-generated monthly payout`,
                                     transactionId: `TXN-${Date.now()}`
                                   });
@@ -702,40 +1050,61 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
             <div className="flex justify-between items-center mb-4">
                <div>
                   <h3 className="font-bold">Student Fee Status</h3>
-                  <p className="text-xs opacity-60">Status of students in your assigned batches</p>
+                  <p className="text-xs opacity-60">Monthly reporting section to monitor paid / unpaid students in your assigned batches.</p>
                </div>
-               <button 
-                 onClick={() => {
-                   const qs = new URLSearchParams(window.location.search);
-                   const showUnpaid = qs.get('unpaid') === 'true';
-                   if (showUnpaid) qs.delete('unpaid');
-                   else qs.set('unpaid', 'true');
-                   window.history.replaceState(null, '', `?${qs.toString()}`);
-                   setActiveTab((prev) => {
-                     setActiveTab('overview');
-                     setTimeout(() => setActiveTab('student-payments'), 0);
-                     return prev;
-                   });
-                 }}
-                 className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${window.location.search.includes('unpaid=true') ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
-               >
-                 {window.location.search.includes('unpaid=true') ? 'Showing Unpaid Only' : 'Show Unpaid Only'}
-               </button>
+               <div className="flex gap-2">
+                 <select
+                   value={getMonthParts(studentStatusMonth).year}
+                   onChange={(e) => updateMonthValue(studentStatusMonth, Number(e.target.value), getMonthParts(studentStatusMonth).monthIndex)}
+                   className="px-3 py-2 rounded-xl text-xs font-bold bg-white/5 border border-white/10"
+                 >
+                   {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+                 </select>
+                 <select
+                   value={getMonthParts(studentStatusMonth).monthIndex}
+                   onChange={(e) => updateMonthValue(studentStatusMonth, getMonthParts(studentStatusMonth).year, Number(e.target.value))}
+                   className="px-3 py-2 rounded-xl text-xs font-bold bg-white/5 border border-white/10"
+                 >
+                   {monthNames.map((name, idx) => <option key={name} value={idx}>{name}</option>)}
+                 </select>
+               </div>
             </div>
+            {(() => {
+              const scopedStudents = enrollments.filter((e) => facultyManagedBatches.some((fb) =>
+                (fb.batchId && fb.batchId === e.batchId) ||
+                (fb.batchName && fb.batchName === e.batchName) ||
+                (fb.subject === 'ALL' || (e.subjects || []).includes(fb.subject))
+              ));
+              const scopedIds = new Set(scopedStudents.map((s) => s.id));
+              const scopedLedger = monthlyFeeLedger.filter((l) => l.month === studentStatusMonth && scopedIds.has(l.studentId));
+              const paidCount = scopedLedger.filter((l) => Number(l.paidAmount || 0) > 0 || l.status === 'Paid').length;
+              const totalCount = scopedStudents.length;
+              const unpaidCount = Math.max(0, totalCount - paidCount);
+
+              return (
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="glass-card p-3"><div className="text-[10px] opacity-60">Assigned Students</div><div className="text-2xl font-black">{totalCount}</div></div>
+                  <div className="glass-card p-3"><div className="text-[10px] opacity-60">Paid ({studentStatusMonth})</div><div className="text-2xl font-black text-green-500">{paidCount}</div></div>
+                  <div className="glass-card p-3"><div className="text-[10px] opacity-60">Unpaid ({studentStatusMonth})</div><div className="text-2xl font-black text-amber-500">{unpaidCount}</div></div>
+                </div>
+              );
+            })()}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                {enrollments
-                 .filter(e => {
-                   const inBatch = facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]));
-                   // Fee tracking months begin from May (month 4 in JS)
-                   const isMayStart = e.createdAt?.seconds ? new Date(e.createdAt.seconds * 1000).getMonth() >= 4 : true;
-                   return inBatch && isMayStart;
-                 })
-                 .filter(e => window.location.search.includes('unpaid=true') ? e.feeStatus !== 'Paid' : true)
-                 .map(e => (
-                 <div key={e.id} className="glass-card p-4 flex items-center justify-between border-l-4 border-l-transparent" style={{ borderLeftColor: e.feeStatus === 'Paid' ? '#10b981' : '#ef4444' }}>
+                 .filter(e => facultyManagedBatches.some(fb =>
+                   (fb.batchId && fb.batchId === e.batchId) ||
+                   (fb.batchName && fb.batchName === e.batchName) ||
+                   (fb.subject === 'ALL' || (e.subjects || []).includes(fb.subject))
+                 ))
+                 .map(e => {
+                 const monthLedger = monthlyFeeLedger.find((l) => l.studentId === e.id && l.month === studentStatusMonth);
+                 const isPaid = Boolean((monthLedger && Number(monthLedger.paidAmount || 0) > 0) || monthLedger?.status === 'Paid');
+                 const paidAmount = Number(monthLedger?.paidAmount || 0);
+                 return (
+                 <div key={e.id} className="glass-card p-4 flex items-center justify-between border-l-4 border-l-transparent" style={{ borderLeftColor: isPaid ? '#10b981' : '#ef4444' }}>
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${e.feeStatus === 'Paid' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
-                        {e.feeStatus === 'Paid' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                      <div className={`p-2 rounded-lg ${isPaid ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                        {isPaid ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
                       </div>
                       <div>
                         <div className="text-sm font-bold">{e.name}</div>
@@ -743,11 +1112,12 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                       </div>
                     </div>
                     <div className="text-right">
-                       <span className={`text-[10px] font-black uppercase ${e.feeStatus === 'Paid' ? 'text-green-500' : 'text-red-500'}`}>
-                         {e.feeStatus || 'Pending'}
+                       <span className={`text-[10px] font-black uppercase ${isPaid ? 'text-green-500' : 'text-red-500'}`}>
+                         {isPaid ? 'Paid' : 'Pending'}
                        </span>
-                       <div className="text-[8px] opacity-40">Current Month</div>
-                       {e.feeStatus !== 'Paid' && (
+                       <div className="text-[8px] opacity-40">{studentStatusMonth}</div>
+                       {isPaid && <div className="text-[10px] text-green-500 font-bold mt-1">₹{paidAmount}</div>}
+                       {!isPaid && (
                          <div className="text-[10px] text-indigo-500 font-bold mt-1 cursor-pointer hover:underline" onClick={() => {
                            const msg = `Hi ${e.name},\nThis is a gentle reminder regarding your pending tuition fees. Please clear them.`;
                            window.open(`https://wa.me/${e.whatsapp?.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`);
@@ -755,10 +1125,175 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                        )}
                     </div>
                  </div>
-               ))}
+               )})}
                {enrollments.length === 0 && <div className="p-10 text-center opacity-40 italic">No assigned students found.</div>}
             </div>
           </motion.div>
+        )}
+
+        {activeTab === 'admin-earnings' && isAdmin && (
+          <motion.div key="admin-earnings" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+            <div className="glass-card p-4 flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+              <div>
+                <h3 className="font-bold">Admin Earnings Monitor</h3>
+                <p className="text-xs opacity-60">Select a faculty and review month-wise earning labels.</p>
+              </div>
+              <div className="flex gap-2">
+                <select
+                  value={adminSelectedFacultyId}
+                  onChange={(e) => setAdminSelectedFacultyId(e.target.value)}
+                  className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs"
+                >
+                  <option value="">Select Faculty</option>
+                  {facultyList.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name || f.email}</option>
+                  ))}
+                </select>
+                <select
+                  value={getMonthParts(selectedMonth).year}
+                  onChange={(e) => updateMonthValue(selectedMonth, Number(e.target.value), getMonthParts(selectedMonth).monthIndex)}
+                  className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs"
+                >
+                  {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <select
+                  value={getMonthParts(selectedMonth).monthIndex}
+                  onChange={(e) => updateMonthValue(selectedMonth, getMonthParts(selectedMonth).year, Number(e.target.value))}
+                  className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs"
+                >
+                  {monthNames.map((name, idx) => <option key={name} value={idx}>{name}</option>)}
+                </select>
+              </div>
+            </div>
+            {adminSelectedFacultyId && (() => {
+              const salaryInfo = facultySalaries.find((s) => s.userId === adminSelectedFacultyId);
+              const facultyMeta = facultyList.find((f) => f.id === adminSelectedFacultyId);
+              const attendanceModeEnabled = salaryInfo?.model === 'per_student' && (salaryInfo?.perStudentFormulaMode || 'attendance_adjusted') === 'attendance_adjusted';
+              const originalBreakdown = getMonthlySalaryBreakdown(salaryInfo, selectedMonth);
+              const breakdown = getMonthlySalaryBreakdown(salaryInfo, selectedMonth, adminAttendanceEdit);
+              const alreadyDisbursed = payouts.filter((p) => p.userId === adminSelectedFacultyId && (p.periodMonth || selectedMonth) === selectedMonth)
+                .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+              const netEarned = breakdown.earnedAmount;
+              const available = netEarned - alreadyDisbursed;
+              const monthAttendanceRows = getAttendanceRowsForFacultyMonth(adminSelectedFacultyId, selectedMonth);
+              return (
+                <div className="space-y-4">
+                  <div className="glass-card p-4">
+                    <div className="text-lg font-black">{facultyMeta?.name || facultyMeta?.email || 'Faculty'}</div>
+                    <div className="text-xs opacity-60">Salary dashboard for {monthNames[getMonthParts(selectedMonth).monthIndex]} {getMonthParts(selectedMonth).year}</div>
+                  </div>
+
+                  <div className="glass-card p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-xs font-black uppercase opacity-60">Attendance Summary (Admin Editable)</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setAdminAttendanceEditMode((v) => !v)}
+                          className={`px-2 py-1 rounded-md text-[10px] font-bold border ${adminAttendanceEditMode ? 'border-indigo-400/60 text-indigo-300 bg-indigo-500/10' : 'border-white/20 text-white/70 bg-white/5'}`}
+                        >
+                          <Edit2 size={12} className="inline mr-1" />
+                          {adminAttendanceEditMode ? 'Editing' : 'Edit'}
+                        </button>
+                        <button
+                          onClick={() => resetMonthlyAttendanceOverride(adminSelectedFacultyId, selectedMonth)}
+                          disabled={isResettingAttendance}
+                          className="px-2 py-1 rounded-md text-[10px] font-bold border border-emerald-400/40 text-emerald-300 bg-emerald-500/10 disabled:opacity-50"
+                        >
+                          {isResettingAttendance ? 'Resetting...' : 'Reset to Auto'}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] opacity-60">Total Class Days</label>
+                        <input type="number" min={0} disabled={!adminAttendanceEditMode} value={adminAttendanceEdit.totalClassDays} onChange={(e) => setAdminAttendanceEdit(v => ({ ...v, totalClassDays: Number(e.target.value || 0), absentDays: Math.max(0, Number(e.target.value || 0) - v.presentDays) }))} className="mt-1 w-full p-2 bg-white/5 border border-white/10 rounded-lg text-sm font-bold disabled:opacity-60" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] opacity-60">Present Days</label>
+                        <input type="number" min={0} disabled={!adminAttendanceEditMode} value={adminAttendanceEdit.presentDays} onChange={(e) => setAdminAttendanceEdit(v => ({ ...v, presentDays: Number(e.target.value || 0), absentDays: Math.max(0, v.totalClassDays - Number(e.target.value || 0)) }))} className="mt-1 w-full p-2 bg-white/5 border border-white/10 rounded-lg text-sm font-bold disabled:opacity-60" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] opacity-60">Absent Days</label>
+                        <input type="number" min={0} disabled={!adminAttendanceEditMode} value={adminAttendanceEdit.absentDays} onChange={(e) => setAdminAttendanceEdit(v => ({ ...v, absentDays: Number(e.target.value || 0) }))} className="mt-1 w-full p-2 bg-white/5 border border-white/10 rounded-lg text-sm font-bold disabled:opacity-60" />
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button disabled={!adminAttendanceEditMode} onClick={() => saveMonthlyAttendanceOverride(adminSelectedFacultyId, selectedMonth, adminAttendanceEdit, { totalClassDays: originalBreakdown.classDays, presentDays: originalBreakdown.presentDays, absentDays: originalBreakdown.absentDays })} className="px-3 py-2 bg-[var(--primary)] text-white rounded-lg text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed">Save Attendance Edits</button>
+                      <button onClick={() => setAttendanceModal({ open: true, facultyId: adminSelectedFacultyId, facultyName: facultyMeta?.name || facultyMeta?.email || 'Faculty', month: selectedMonth })} className="px-3 py-2 bg-white/10 rounded-lg text-xs font-bold">View Attendance Table ({monthAttendanceRows.length})</button>
+                    </div>
+                  </div>
+
+                  {attendanceModeEnabled && (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                        <div className="glass-card p-4"><div className="text-[10px] opacity-60">Full Potential</div><div className="text-2xl font-black text-violet-400">₹{Math.round(breakdown.fullPotentialAmount).toLocaleString()}</div></div>
+                        <div className="glass-card p-4"><div className="text-[10px] opacity-60">Earnings (Paid Students)</div><div className="text-2xl font-black text-green-500">₹{Math.round(netEarned).toLocaleString()}</div></div>
+                        <div className="glass-card p-4"><div className="text-[10px] opacity-60">Salary Paid</div><div className="text-2xl font-black text-blue-400">₹{Math.round(alreadyDisbursed).toLocaleString()}</div></div>
+                        <div className="glass-card p-4"><div className="text-[10px] opacity-60">Balance Salary</div><div className={`text-2xl font-black ${available < 0 ? 'text-amber-400' : 'text-indigo-500'}`}>₹{Math.round(Math.abs(available)).toLocaleString()}</div><div className="text-[10px] opacity-60 mt-1">{available < 0 ? 'Advance Paid to Faculty' : 'Pending payout'}</div></div>
+                        <div className="glass-card p-4"><div className="text-[10px] opacity-60">Pending Students</div><div className="text-2xl font-black text-amber-500">{breakdown.unpaidStudentsCount}</div></div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="glass-card p-4"><div className="text-[10px] opacity-60">Total Students</div><div className="text-2xl font-black">{breakdown.totalAssignedStudents}</div></div>
+                        <div className="glass-card p-4"><div className="text-[10px] opacity-60">Paid Students</div><div className="text-2xl font-black text-green-500">{breakdown.paidStudentsCount}</div></div>
+                        <div className="glass-card p-4"><div className="text-[10px] opacity-60">Pending Students</div><div className="text-2xl font-black text-amber-500">{breakdown.unpaidStudentsCount}</div></div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {attendanceModal.open && (
+          <div className="fixed inset-0 z-[2200] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setAttendanceModal({ open: false, facultyId: '', facultyName: '', month: '' })} />
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="relative w-full max-w-6xl bg-[#171717] border border-white/10 rounded-2xl p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-lg font-black">Attendance Details</h4>
+                  <p className="text-xs opacity-60">{attendanceModal.facultyName} • {attendanceModal.month}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => exportAttendancePdf(attendanceModalRows, attendanceModal.facultyName, attendanceModal.month)} className="px-3 py-2 rounded-lg bg-red-500/20 text-red-300 text-xs font-bold flex items-center gap-1"><Download size={14} /> Download PDF</button>
+                  <button onClick={() => exportAttendanceXlsx(attendanceModalRows, attendanceModal.facultyName, attendanceModal.month)} className="px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs font-bold flex items-center gap-1"><Download size={14} /> Download Excel</button>
+                </div>
+              </div>
+              <div className="mt-4 max-h-[60vh] overflow-auto border border-white/10 rounded-xl">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-black/70 backdrop-blur text-[10px] uppercase opacity-70">
+                    <tr>
+                      <th className="p-3">Date</th>
+                      <th className="p-3">Subject</th>
+                      <th className="p-3">Batch</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Marked By</th>
+                      <th className="p-3">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {attendanceModalRows.map((row: any) => {
+                      const n = normalizeAttendanceRow(row);
+                      return (
+                      <tr key={row.id || `${n.date}-${n.subject}-${n.batch}`}>
+                        <td className="p-3">{n.date}</td>
+                        <td className="p-3">{n.subject}</td>
+                        <td className="p-3">{n.batch}</td>
+                        <td className="p-3">{n.status}</td>
+                        <td className="p-3">{n.markedBy}</td>
+                        <td className="p-3">{n.timestamp}</td>
+                      </tr>
+                    )})}
+                    {attendanceModalRows.length === 0 && (
+                      <tr><td colSpan={6} className="p-5 text-center opacity-50">No attendance data for this period.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -812,14 +1347,27 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                           onClick={() => {
                             const tid = prompt('Enter Transaction ID for Payout:');
                             if (!tid) return;
+                            const amountInput = prompt('Enter amount to disburse (partial allowed):', String(req.amount || 0));
+                            const amount = Number(amountInput || 0);
+                            if (!amount || amount <= 0) return;
+                            const note = prompt('Optional note for disbursement log:', 'Processed from disbursement request') || '';
                             recordPayout({
                               userId: req.userId,
                               userName: req.userName,
-                              amount: req.amount,
+                              amount,
                               transactionId: tid,
-                              note: 'Processed from early disbursement request'
+                              note,
+                              periodMonth: selectedMonth,
+                              method: 'manual',
+                              approvedBy: user.email
                             });
-                            firestoreService.updateItem('payout_requests', req.id, { status: 'processed', transactionId: tid });
+                            firestoreService.updateItem('payout_requests', req.id, {
+                              status: amount === Number(req.amount || 0) ? 'processed' : 'partially_processed',
+                              transactionId: tid,
+                              processedAmount: amount,
+                              approvedBy: user.email,
+                              processedAt: serverTimestamp(),
+                            });
                           }} 
                           className="px-4 py-2 bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors"
                         >
@@ -882,6 +1430,27 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                   />
                 </div>
                 <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase opacity-40">Method</label>
+                  <select
+                    className="w-full p-3 bg-gray-100 dark:bg-white/5 border border-white/10 rounded-xl text-sm"
+                    value={payoutForm.method}
+                    onChange={e => setPayoutForm({...payoutForm, method: e.target.value})}
+                  >
+                    <option value="upi">UPI</option>
+                    <option value="bank">Bank Transfer</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase opacity-40">Period Month</label>
+                  <input
+                    type="month"
+                    className="w-full p-3 bg-gray-100 dark:bg-white/5 border border-white/10 rounded-xl text-sm outline-none focus:border-[var(--primary)]"
+                    value={payoutForm.periodMonth}
+                    onChange={e => setPayoutForm({...payoutForm, periodMonth: e.target.value})}
+                  />
+                </div>
+                <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase opacity-40">Note</label>
                   <input
                     type="text"
@@ -901,10 +1470,13 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                       userName: targetFaculty.name || targetFaculty.email,
                       amount: Number(payoutForm.amount),
                       transactionId: payoutForm.transactionId,
-                      note: payoutForm.note
+                      note: payoutForm.note,
+                      method: payoutForm.method,
+                      periodMonth: payoutForm.periodMonth,
+                      approvedBy: user.email
                     });
                     setIsAddingPayout(false);
-                    setPayoutForm({ userId: '', amount: '', transactionId: '', note: '' });
+                    setPayoutForm({ userId: '', amount: '', transactionId: '', note: '', method: 'upi', periodMonth: new Date().toISOString().slice(0, 7) });
                   } else {
                     toast.error('Select faculty and enter amount');
                   }
@@ -1070,7 +1642,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
 
                     {(() => {
                       const facultyAssignedBatches = facultyBatches.filter(fb => fb.userId === user.uid);
-                      const monthLogs = attendance.filter(a => a.userId === user.uid && a.dateStr.startsWith(selectedMonth));
+                      const monthLogs = attendance.filter(a => a.userId === user.uid && (a.dateStr || '').startsWith(selectedMonth));
                       const presentDays = monthLogs.filter(a => a.status === 'present').length;
                       const attendanceRate = monthLogs.length > 0 ? Math.round((presentDays / monthLogs.length) * 100) : 100;
 
@@ -1097,7 +1669,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                   <div className="relative z-10 w-full space-y-4">
                     <div className="p-6 bg-gradient-to-br from-[var(--primary)] to-indigo-600 rounded-3xl text-white shadow-xl">
                        <span className="text-[8px] font-black uppercase tracking-widest opacity-70 block mb-1">Total Payout Pending</span>
-                       <div className="text-3xl font-black">₹{myBalance.toLocaleString()}</div>
+                      <div className="text-3xl font-black">₹{Number(displayBalance || 0).toLocaleString()}</div>
                        <div className="text-[8px] opacity-60 font-bold mt-1 uppercase tracking-tighter italic">— Secure Digital Split —</div>
                     </div>
                     <p className="text-[8px] text-white/30 text-center font-bold tracking-widest uppercase italic">Xavi x Sonai Internal Platform</p>
