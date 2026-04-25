@@ -210,7 +210,15 @@ export default function EnrollmentSection() {
               <div className="bg-gradient-to-r from-[var(--primary)] to-[var(--danger)] h-2.5 rounded-full transition-all duration-1000" style={{ width: `${progressPercentage}%` }}></div>
             </div>
             {batchConfig.waitlistMessage && (
-              <p className="text-xs font-bold text-[var(--danger)] leading-relaxed">
+              <p
+                className="leading-relaxed"
+                style={{
+                  color: batchConfig.waitlistTextColor || 'var(--danger)',
+                  fontFamily: batchConfig.waitlistFontFamily || 'inherit',
+                  fontSize: `${batchConfig.waitlistFontSize || 12}px`,
+                  fontWeight: 700,
+                }}
+              >
                 {batchConfig.waitlistMessage}
               </p>
             )}

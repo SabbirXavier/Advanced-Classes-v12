@@ -415,12 +415,6 @@ export default function FinanceModule() {
           Day Book
         </button>
         <button 
-          onClick={() => setActiveView('splits' as any)}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeView === 'splits' as any ? 'bg-white dark:bg-[#1e1e1e] text-[var(--primary)] shadow-sm' : 'text-gray-500'}`}
-        >
-          Splits Ledger (Payroll)
-        </button>
-        <button 
           onClick={() => setActiveView('fees')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeView === 'fees' ? 'bg-white dark:bg-[#1e1e1e] text-[var(--primary)] shadow-sm' : 'text-gray-500'}`}
         >

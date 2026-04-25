@@ -276,7 +276,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
 
   const getMonthlySalaryBreakdown = (salaryInfo: any, month: string, manualOverride?: { totalClassDays: number; presentDays: number; absentDays: number }) => {
     if (!salaryInfo?.userId) {
-      return { presentDays: 0, classDays: 0, absentDays: 0, totalAssignedStudents: 0, paidStudentsCount: 0, unpaidStudentsCount: 0, earnedAmount: 0, pendingPotentialAmount: 0, fullPotentialAmount: 0 };
+      return { presentDays: 0, classDays: 0, absentDays: 0, totalAssignedStudents: 0, paidStudentsCount: 0, unpaidStudentsCount: 0, earnedAmount: 0, pendingPotentialAmount: 0, fullPotentialAmount: 0, realTimeEarnedAmount: 0 };
     }
 
     const attendanceRows = getAttendanceRowsForFacultyMonth(salaryInfo.userId, month);
@@ -300,6 +300,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     let earnedAmount = 0;
     let pendingPotentialAmount = 0;
     let fullPotentialAmount = 0;
+    const realTimeEarnedAmount = classDays > 0 ? ((paidStudentsCount * 500) / classDays) * presentDays : 0;
 
     if (model === 'monthly') {
       const totalFixedSalary = Number(salaryInfo.baseAmount || 0);
@@ -326,7 +327,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
         : Math.max(0, (rate * unpaidStudentsCount));
     }
 
-    return { presentDays, classDays, absentDays, totalAssignedStudents, paidStudentsCount, unpaidStudentsCount, earnedAmount, pendingPotentialAmount, fullPotentialAmount };
+    return { presentDays, classDays, absentDays, totalAssignedStudents, paidStudentsCount, unpaidStudentsCount, earnedAmount, pendingPotentialAmount, fullPotentialAmount, realTimeEarnedAmount };
   };
 
   const calculateNetReceivable = (salaryInfo: any, month: string) => {
@@ -725,7 +726,11 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                     <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                       <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Full Potential</div><div className="font-black mt-1">₹{Math.round(myMonthBreakdown.fullPotentialAmount).toLocaleString()}</div></div>
                       <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Earnings (Paid Students)</div><div className="font-black mt-1">₹{Math.round(myMonthBreakdown.earnedAmount).toLocaleString()}</div></div>
-                      <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Real-Time Earned</div><div className="font-black mt-1 text-green-400">₹{Math.round(myMonthBreakdown.earnedAmount).toLocaleString()}</div></div>
+                      <div className="bg-white/5 rounded-xl p-3">
+                        <div className="text-[10px] opacity-60">Real-Time Earned</div>
+                        <div className="font-black mt-1 text-green-400">₹{Math.round(myMonthBreakdown.realTimeEarnedAmount).toLocaleString()}</div>
+                        <div className="text-[10px] opacity-50 mt-1">((Paid × 500) ÷ Class Days) × Present Days</div>
+                      </div>
                       <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Salary Paid</div><div className="font-black mt-1 text-blue-400">₹{Math.round(salaryPaid).toLocaleString()}</div></div>
                       <div className="bg-white/5 rounded-xl p-3"><div className="text-[10px] opacity-60">Balance Salary</div><div className={`font-black mt-1 ${balanceSalary < 0 ? 'text-amber-400' : 'text-indigo-400'}`}>₹{Math.round(Math.abs(balanceSalary)).toLocaleString()}</div><div className="text-[10px] opacity-60 mt-1">{balanceSalary < 0 ? 'Advance Paid to Faculty' : 'Pending balance'}</div></div>
                     </div>
@@ -1233,9 +1238,10 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
 
                   {attendanceModeEnabled && (
                     <>
-                      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                      <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
                         <div className="glass-card p-4"><div className="text-[10px] opacity-60">Full Potential</div><div className="text-2xl font-black text-violet-400">₹{Math.round(breakdown.fullPotentialAmount).toLocaleString()}</div></div>
                         <div className="glass-card p-4"><div className="text-[10px] opacity-60">Earnings (Paid Students)</div><div className="text-2xl font-black text-green-500">₹{Math.round(netEarned).toLocaleString()}</div></div>
+                        <div className="glass-card p-4"><div className="text-[10px] opacity-60">Real-Time Earned</div><div className="text-2xl font-black text-emerald-400">₹{Math.round(breakdown.realTimeEarnedAmount).toLocaleString()}</div><div className="text-[10px] opacity-50 mt-1">((Paid × 500) ÷ Class Days) × Present</div></div>
                         <div className="glass-card p-4"><div className="text-[10px] opacity-60">Salary Paid</div><div className="text-2xl font-black text-blue-400">₹{Math.round(alreadyDisbursed).toLocaleString()}</div></div>
                         <div className="glass-card p-4"><div className="text-[10px] opacity-60">Balance Salary</div><div className={`text-2xl font-black ${available < 0 ? 'text-amber-400' : 'text-indigo-500'}`}>₹{Math.round(Math.abs(available)).toLocaleString()}</div><div className="text-[10px] opacity-60 mt-1">{available < 0 ? 'Advance Paid to Faculty' : 'Pending payout'}</div></div>
                         <div className="glass-card p-4"><div className="text-[10px] opacity-60">Pending Students</div><div className="text-2xl font-black text-amber-500">{breakdown.unpaidStudentsCount}</div></div>

@@ -18,6 +18,12 @@ export interface Channel {
   description: string;
   permissions: ChannelPermissions;
   order: number;
+  isSupportTicket?: boolean;
+  ticketOwnerId?: string;
+  ticketStatus?: 'open' | 'solved' | 'closed';
+  autoDeleteAt?: number;
+  closedAt?: number;
+  closedBy?: string;
 }
 
 const defaultPermissions: ChannelPermissions = {
@@ -91,6 +97,29 @@ export const channelService = {
       await deleteDoc(doc(db, 'channels_config', channelId));
     } catch (error) {
       console.error("Error deleting channel:", error);
+      throw error;
+    }
+  },
+
+  async closeSupportTicket(channelId: string, closedBy: string) {
+    try {
+      const autoDeleteAt = Date.now() + 10000;
+      await updateDoc(doc(db, 'channels_config', channelId), {
+        ticketStatus: 'solved',
+        autoDeleteAt,
+        closedAt: Date.now(),
+        closedBy
+      });
+
+      setTimeout(async () => {
+        try {
+          await this.deleteChannel(channelId);
+        } catch (error) {
+          console.error("Error auto-deleting closed support ticket:", error);
+        }
+      }, 10000);
+    } catch (error) {
+      console.error("Error closing support ticket:", error);
       throw error;
     }
   }
