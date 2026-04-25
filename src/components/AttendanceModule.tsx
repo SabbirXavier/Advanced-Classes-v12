@@ -128,6 +128,14 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
   };
 
   const parseDateToComparable = (dateStr: string) => new Date(dateStr).getTime();
+  const csvEscape = (value: any) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const normalizeTimeValue = (value: any) => {
+    if (value === null || value === undefined || value === '') return '';
+    if (typeof value === 'string') return value;
+    if (typeof value?.toDate === 'function') return value.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (value instanceof Date) return value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return '';
+  };
 
   const isDateInRange = (dateSeconds: number) => {
     if (reportDateRange === 'all') return true;
@@ -172,7 +180,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
       subject: string;
       totalClasses: number;
       dates: Record<string, Record<string, { present: number; absent: number; }>>;
-      students: Record<string, { name: string; email: string; whatsapp: string; present: number; absent: number; }>;
+      students: Record<string, { name: string; email: string; whatsapp: string; present: number; absent: number; latestTimeMarkedAt: string; latestMarkedAtMs: number; }>;
     }> = {};
 
     studentAttendance.forEach(a => {
@@ -200,7 +208,9 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                    email: sData ? sData.email : '',
                    whatsapp: sData ? sData.whatsapp : (exData ? (exData.whatsapp || '') : ''),
                    present: 0,
-                   absent: 0
+                   absent: 0,
+                   latestTimeMarkedAt: '',
+                   latestMarkedAtMs: 0
                 };
              }
              if (!report[reportKey].dates[dateStr][studentId]) {
@@ -212,6 +222,11 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
              } else if (status === 'absent') {
                 report[reportKey].students[studentId].absent++;
                 report[reportKey].dates[dateStr][studentId].absent++;
+             }
+             const markedAtMs = a.markedAt?.seconds ? a.markedAt.seconds * 1000 : 0;
+             if (markedAtMs >= report[reportKey].students[studentId].latestMarkedAtMs) {
+                report[reportKey].students[studentId].latestMarkedAtMs = markedAtMs;
+                report[reportKey].students[studentId].latestTimeMarkedAt = normalizeTimeValue(a.timeMarkedAt) || (markedAtMs ? new Date(markedAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
              }
           });
        }
@@ -237,7 +252,9 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                    email: student.email || '',
                    whatsapp: student.whatsapp || '',
                    present: 0,
-                   absent: 0
+                   absent: 0,
+                   latestTimeMarkedAt: '',
+                   latestMarkedAtMs: 0
                 };
              }
           });
@@ -1423,14 +1440,24 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                 <button 
                   onClick={() => {
                     if (reportTab === 'student') {
-                      let csv = 'Batch,Subject,Student Name,Email,Total Classes,Present,Absent,Percentage\n';
+                      let csv = 'Batch,Subject,Student Name,Email,Last Marked Time,Total Classes,Present,Absent,Percentage\n';
                       let hasData = false;
                       Object.values(batchWiseReport).forEach(batch => {
                         Object.entries(batch.students).forEach(([id, s]) => {
                           hasData = true;
                           const total = s.present + s.absent;
                           const pct = total > 0 ? Math.round((s.present/total)*100) : 0;
-                          csv += `"${batch.batchName}","${batch.subject}","${s.name}","${s.email}",${batch.totalClasses},${s.present},${s.absent},${pct}%\n`;
+                          csv += [
+                            csvEscape(batch.batchName),
+                            csvEscape(batch.subject),
+                            csvEscape(s.name),
+                            csvEscape(s.email),
+                            csvEscape(s.latestTimeMarkedAt || '-'),
+                            batch.totalClasses,
+                            s.present,
+                            s.absent,
+                            csvEscape(`${pct}%`)
+                          ].join(',') + '\n';
                         });
                       });
                       if (!hasData) return toast.error('No data to export');
@@ -1443,7 +1470,18 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                     } else {
                       const dataToExport = sortedFacultyAttendance;
                       if (dataToExport.length === 0) return toast.error('No data to export');
-                      let csv = 'Date,Faculty Name,Email,Status,Disapproval Reason\n' + dataToExport.map(r => `${r.dateStr},${r.userName},${r.userEmail},${r.isApproved ? 'Approved' : 'Disapproved'},${r.disapprovalReason || ''}`).join('\n');
+                      const csvRows = dataToExport.map(r => {
+                        const markedTime = normalizeTimeValue(r.timeMarkedAt) || normalizeTimeValue(r.markedAt) || '-';
+                        return [
+                          csvEscape(r.dateStr || ''),
+                          csvEscape(r.userName || ''),
+                          csvEscape(r.userEmail || ''),
+                          csvEscape(r.isApproved ? 'Approved' : 'Disapproved'),
+                          csvEscape(markedTime),
+                          csvEscape(r.disapprovalReason || '')
+                        ].join(',');
+                      });
+                      let csv = 'Date,Faculty Name,Email,Status,Time,Disapproval Reason\n' + csvRows.join('\n');
                       const blob = new Blob([csv], { type: 'text/csv' });
                       const url = window.URL.createObjectURL(blob);
                       const a = document.createElement('a');
