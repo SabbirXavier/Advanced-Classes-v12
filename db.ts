@@ -30,8 +30,66 @@ const enrollmentSchema = new mongoose.Schema({
 const chatUserSchema = new mongoose.Schema({ name: String, phone: String, photoUrl: String, bio: String, class: String, stream: String, school: String, address: String, role: { type: String, default: 'student' }, status: { type: String, default: 'active' }, warnings: { type: Number, default: 0 } });
 const chatMessageSchema = new mongoose.Schema({ senderId: String, text: String, timestamp: Number, isDeleted: { type: Boolean, default: false }, isEdited: { type: Boolean, default: false }, replyTo: String });
 const chatSettingsSchema = new mongoose.Schema({ roomId: String, name: String, description: String });
+const pricingPlanSchema = new mongoose.Schema({ planType: String, subject: String, subjects: [String], grade: String, amount: Number, isActive: { type: Boolean, default: true } });
+const pricingRuleSchema = new mongoose.Schema({ ruleType: String, priority: Number, config: Object, isActive: { type: Boolean, default: true } });
+const studentFeeLedgerV2Schema = new mongoose.Schema({
+  student_id: String,
+  month: String,
+  base_amount: Number,
+  discount_amount: Number,
+  net_payable: Number,
+  paid_amount: Number,
+  balance: Number,
+  status: String,
+  snapshot_json: Object,
+  revision_of: String,
+  createdAt: { type: Date, default: Date.now }
+});
+const feePaymentsV2Schema = new mongoose.Schema({
+  student_id: String,
+  ledger_id: String,
+  amount: Number,
+  idempotency_key: { type: String, unique: true },
+  createdAt: { type: Date, default: Date.now },
+  source: String
+});
+const attendanceRecordSchema = new mongoose.Schema({
+  faculty_id: String,
+  subject: String,
+  batch_id: String,
+  date: String,
+  status: String,
+  edited_by: String,
+  edit_reason: String,
+  createdAt: { type: Date, default: Date.now }
+});
+const facultyContractSchema = new mongoose.Schema({
+  faculty_id: String,
+  model: String,
+  config: Object,
+  isActive: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+const facultyEarningV2Schema = new mongoose.Schema({
+  faculty_id: String,
+  month: String,
+  amount: Number,
+  basis: String,
+  snapshot: Object,
+  createdAt: { type: Date, default: Date.now }
+});
+const auditLogSchema = new mongoose.Schema({
+  actor_id: String,
+  action: String,
+  entity: String,
+  entity_id: String,
+  payload: Object,
+  createdAt: { type: Date, default: Date.now }
+});
 
 let Batch: any, Routine: any, Download: any, Fee: any, Enrollment: any, ChatUser: any, ChatMessage: any, ChatSettings: any;
+let PricingPlan: any, PricingRule: any, StudentFeeLedgerV2: any, FeePaymentV2: any, AttendanceRecord: any, FacultyContract: any, FacultyEarningV2: any, AuditLog: any;
 
 const initModels = () => {
   Batch = mongoose.models.Batch || mongoose.model('Batch', batchSchema);
@@ -42,6 +100,14 @@ const initModels = () => {
   ChatUser = mongoose.models.ChatUser || mongoose.model('ChatUser', chatUserSchema);
   ChatMessage = mongoose.models.ChatMessage || mongoose.model('ChatMessage', chatMessageSchema);
   ChatSettings = mongoose.models.ChatSettings || mongoose.model('ChatSettings', chatSettingsSchema);
+  PricingPlan = mongoose.models.PricingPlan || mongoose.model('PricingPlan', pricingPlanSchema);
+  PricingRule = mongoose.models.PricingRule || mongoose.model('PricingRule', pricingRuleSchema);
+  StudentFeeLedgerV2 = mongoose.models.StudentFeeLedgerV2 || mongoose.model('StudentFeeLedgerV2', studentFeeLedgerV2Schema);
+  FeePaymentV2 = mongoose.models.FeePaymentV2 || mongoose.model('FeePaymentV2', feePaymentsV2Schema);
+  AttendanceRecord = mongoose.models.AttendanceRecord || mongoose.model('AttendanceRecord', attendanceRecordSchema);
+  FacultyContract = mongoose.models.FacultyContract || mongoose.model('FacultyContract', facultyContractSchema);
+  FacultyEarningV2 = mongoose.models.FacultyEarningV2 || mongoose.model('FacultyEarningV2', facultyEarningV2Schema);
+  AuditLog = mongoose.models.AuditLog || mongoose.model('AuditLog', auditLogSchema);
 };
 
 if (useMongo) {
@@ -49,7 +115,7 @@ if (useMongo) {
 }
 
 // Local Fallback State (for AI Studio Preview)
-let localData: any = { batches: [], routines: [], downloads: [], fees: [], enrollments: [], chatUsers: [], chatMessages: [], chatSettings: [] };
+let localData: any = { batches: [], routines: [], downloads: [], fees: [], enrollments: [], chatUsers: [], chatMessages: [], chatSettings: [], pricing_plans: [], pricing_rules: [], student_fee_ledger_v2: [], fee_payments_v2: [], attendance_records: [], faculty_contracts: [], faculty_earnings_v2: [], audit_logs: [] };
 const LOCAL_FILE = 'local_db.json';
 
 export const initDB = async () => {
@@ -161,6 +227,14 @@ const getModel = (type: string) => {
     case 'chatUsers': return ChatUser;
     case 'chatMessages': return ChatMessage;
     case 'chatSettings': return ChatSettings;
+    case 'pricing_plans': return PricingPlan;
+    case 'pricing_rules': return PricingRule;
+    case 'student_fee_ledger_v2': return StudentFeeLedgerV2;
+    case 'fee_payments_v2': return FeePaymentV2;
+    case 'attendance_records': return AttendanceRecord;
+    case 'faculty_contracts': return FacultyContract;
+    case 'faculty_earnings_v2': return FacultyEarningV2;
+    case 'audit_logs': return AuditLog;
     default: return null;
   }
 };

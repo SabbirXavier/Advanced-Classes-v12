@@ -101,6 +101,7 @@ export default function TabAdmin({ branding }: { branding?: any }) {
   const [editingEnrollment, setEditingEnrollment] = useState<any>(null);
   const [verifyingPayment, setVerifyingPayment] = useState<any>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
   const [radarConfig, setRadarConfig] = useState<RadarConfig>({
     syncIntervalMinutes: 60,
     lastSyncAt: null,
@@ -128,6 +129,11 @@ export default function TabAdmin({ branding }: { branding?: any }) {
     }
   };
 
+  const isTableExpanded = (key: string) => Boolean(expandedTables[key]);
+  const toggleTableExpanded = (key: string) => {
+    setExpandedTables((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
   // Automatic Routine Sync & Cleanup
   useEffect(() => {
     if (isLoggedIn && user && routines.length > 0) {
@@ -145,11 +151,11 @@ export default function TabAdmin({ branding }: { branding?: any }) {
 
         if (radarConfig.autoSyncEnabled && diffMs >= intervalMs) {
           const todayRoutines = routines.filter(r => r[today] && r[today] !== '-');
-          let addedCount = 0;
+          let syncCount = 0;
           for (const r of todayRoutines) {
             const existing = radars.find(rad => rad.routineId === r.id && rad.date === todayDateStr);
-            if (!existing) {
-              try {
+            try {
+              if (!existing) {
                 await firestoreService.addItem('radars', {
                   title: r[today],
                   time: r.startTime && r.endTime ? `${r.startTime} - ${r.endTime}` : (r.time || r.startTime || ''),
@@ -161,15 +167,27 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                   notes: '',
                   type: 'text',
                   fileUrl: '',
-                  externalUrl: ''
+                  externalUrl: '',
+                  autoSynced: true
                 });
-                addedCount++;
-              } catch (e) {
-                console.error("Auto-sync failed:", e);
+                syncCount++;
+              } else if (!existing.adminEdited) {
+                await firestoreService.updateItem('radars', existing.id, {
+                  ...existing,
+                  title: r[today],
+                  time: r.startTime && r.endTime ? `${r.startTime} - ${r.endTime}` : (r.time || r.startTime || ''),
+                  startTime: r.startTime || r.time || '',
+                  endTime: r.endTime || '',
+                  status: existing.status === 'completed' ? 'upcoming' : (existing.status || 'upcoming'),
+                  autoSynced: true
+                });
+                syncCount++;
               }
+            } catch (e) {
+              console.error("Auto-sync failed:", e);
             }
           }
-          if (addedCount > 0) {
+          if (syncCount > 0) {
             await radarService.markSynced();
           }
         }
@@ -201,15 +219,15 @@ export default function TabAdmin({ branding }: { branding?: any }) {
             
             // Check if it's from a previous day
             if (radDate < kolkataMidnight) {
-              await firestoreService.deleteItem('radars', rad.id);
+              await firestoreService.updateItem('radars', rad.id, { ...rad, status: 'completed' });
               continue;
             }
 
             // If it's today, check if it's expired
             if (rad.date === todayDateStr && rad.endTime) {
               const end = parseTimeStr(rad.endTime);
-              if (end && kolkataNow > end) {
-                await firestoreService.deleteItem('radars', rad.id);
+              if (end && kolkataNow >= end && rad.status !== 'completed') {
+                await firestoreService.updateItem('radars', rad.id, { ...rad, status: 'completed' });
               }
             }
           } catch (e) {
@@ -1118,6 +1136,21 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                       >
                         <Settings size={18} />
                       </button>
+                      <button
+                        onClick={async () => {
+                          if (['general', 'resources', 'announcements', 'help'].includes(ch.id)) {
+                            toast.error('Default channels cannot be deleted.');
+                            return;
+                          }
+                          if (!window.confirm(`Delete #${ch.name}? This action is permanent.`)) return;
+                          await channelService.deleteChannel(ch.id);
+                          toast.success('Channel deleted');
+                        }}
+                        className="p-2 rounded-lg transition-colors bg-red-500/10 hover:bg-red-500/20 text-red-500 ml-2"
+                        title="Delete Channel"
+                      >
+                        <Trash2 size={18} />
+                      </button>
                     </div>
 
                     {editingChannel?.id === ch.id && (
@@ -1590,6 +1623,8 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                 )
               );
               if (batchEnrollments.length === 0) return null;
+              const tableKey = `enrolled-${grade}`;
+              const visibleEnrollments = isTableExpanded(tableKey) ? batchEnrollments : batchEnrollments.slice(0, 3);
               return (
                 <div key={grade} className="border border-[var(--border-color)] rounded-xl overflow-hidden">
                   <div className="bg-[var(--primary)]/10 p-4 border-b border-[var(--border-color)] flex justify-between items-center">
@@ -1636,7 +1671,7 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--border-color)]">
-                        {batchEnrollments.map(student => (
+                        {visibleEnrollments.map(student => (
                           <tr key={student.id} className="hover:bg-white/5">
                             <td className="p-3 font-semibold">{student.name}</td>
                             <td className="p-3">
@@ -1680,6 +1715,16 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                       </tbody>
                     </table>
                   </div>
+                  {batchEnrollments.length > 3 && (
+                    <div className="px-4 py-3 border-t border-[var(--border-color)] bg-white/5 flex justify-center">
+                      <button
+                        onClick={() => toggleTableExpanded(tableKey)}
+                        className="text-xs font-bold px-3 py-1 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20"
+                      >
+                        {isTableExpanded(tableKey) ? 'Collapse' : `Expand (${batchEnrollments.length - 3} more)`}
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1720,8 +1765,8 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                       <th className="p-3 text-xs font-bold uppercase opacity-60 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {enrollments.map(student => {
+                <tbody>
+                    {(isTableExpanded('fees-verification') ? enrollments : enrollments.slice(0, 3)).map(student => {
                       const pendingPayments = (student.paymentHistory?.filter((p: any) => p.status === 'pending') || [])
                         .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
                       return (
@@ -1784,12 +1829,22 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                               {student.feeStatus === 'Paid' ? 'Mark Unpaid' : 'Verify Paid'}
                             </button>
                           </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                    </tr>
+                  );
+                })}
+                </tbody>
+              </table>
+              {enrollments.length > 3 && (
+                <div className="px-4 py-3 border-t border-[var(--border-color)] bg-white/5 flex justify-center">
+                  <button
+                    onClick={() => toggleTableExpanded('fees-verification')}
+                    className="text-xs font-bold px-3 py-1 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20"
+                  >
+                    {isTableExpanded('fees-verification') ? 'Collapse' : `Expand (${enrollments.length - 3} more)`}
+                  </button>
+                </div>
+              )}
+            </div>
             </div>
 
             {/* Subject Pricing Section */}
@@ -1893,7 +1948,7 @@ export default function TabAdmin({ branding }: { branding?: any }) {
           <div className="space-y-6">
             <div className="flex justify-between items-center">
               <h3 className="text-xl font-bold text-[var(--primary)]">Edit Batches</h3>
-              <button onClick={() => openAddModal('batches', { name: '', tag: '', date: '', description: '', color: 'var(--primary)', tagColor: 'var(--primary)', capacity: 24, showProgressBar: false, waitlistMessage: '', enrollmentStatus: 'none' })} className="px-3 py-1 bg-[var(--primary)] text-white rounded-lg text-sm font-bold hover:opacity-90 active:scale-95 transition-all">+ Add Batch</button>
+              <button onClick={() => openAddModal('batches', { name: '', tag: '', date: '', description: '', color: 'var(--primary)', tagColor: 'var(--primary)', capacity: 24, showProgressBar: false, waitlistMessage: '', waitlistTextColor: '#ef4444', waitlistFontFamily: 'inherit', waitlistFontSize: 12, enrollmentStatus: 'none' })} className="px-3 py-1 bg-[var(--primary)] text-white rounded-lg text-sm font-bold hover:opacity-90 active:scale-95 transition-all">+ Add Batch</button>
             </div>
             {batches.map(batch => (
               <div key={batch.id} className="border border-[var(--border-color)] p-4 rounded-xl space-y-3">
@@ -1931,7 +1986,21 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                   </label>
                 </div>
                 {batch.showProgressBar && (
-                  <textarea className="w-full p-2 bg-white/5 border border-[var(--border-color)] rounded text-sm" value={batch.waitlistMessage || ''} onChange={e => setBatches(batches.map(b => b.id === batch.id ? {...b, waitlistMessage: e.target.value} : b))} placeholder="Waitlist Message (e.g. Note: If you miss these final seats...)" />
+                  <div className="space-y-2">
+                    <textarea className="w-full p-2 bg-white/5 border border-[var(--border-color)] rounded text-sm" value={batch.waitlistMessage || ''} onChange={e => setBatches(batches.map(b => b.id === batch.id ? {...b, waitlistMessage: e.target.value} : b))} placeholder="Waitlist Message (e.g. Note: If you miss these final seats...)" />
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input type="color" className="w-full h-10 p-1 bg-white/5 border border-[var(--border-color)] rounded" value={batch.waitlistTextColor || '#ef4444'} onChange={e => setBatches(batches.map(b => b.id === batch.id ? {...b, waitlistTextColor: e.target.value} : b))} />
+                      <select className="w-full p-2 bg-white/5 border border-[var(--border-color)] rounded text-sm [&>option]:bg-white dark:[&>option]:bg-gray-900" value={batch.waitlistFontFamily || 'inherit'} onChange={e => setBatches(batches.map(b => b.id === batch.id ? {...b, waitlistFontFamily: e.target.value} : b))}>
+                        <option value="inherit">Default Font</option>
+                        <option value="Inter, sans-serif">Inter</option>
+                        <option value="Poppins, sans-serif">Poppins</option>
+                        <option value="Montserrat, sans-serif">Montserrat</option>
+                        <option value="serif">Serif</option>
+                        <option value="monospace">Monospace</option>
+                      </select>
+                      <input type="number" min={10} max={30} className="w-full p-2 bg-white/5 border border-[var(--border-color)] rounded text-sm" value={batch.waitlistFontSize || 12} onChange={e => setBatches(batches.map(b => b.id === batch.id ? {...b, waitlistFontSize: Number(e.target.value)} : b))} placeholder="Font Size" />
+                    </div>
+                  </div>
                 )}
                 <div className="flex items-center gap-4 p-2 bg-white/5 border border-[var(--border-color)] rounded">
                   <label className="flex items-center gap-2 cursor-pointer text-sm font-bold">
@@ -2223,13 +2292,15 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {enrollments
-                    .filter(s => s.feeStatus === 'Paid')
-                    .filter(s => 
-                      (s.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (s.email || '').toLowerCase().includes(searchQuery.toLowerCase())
-                    )
-                    .map((student, i) => (
+                  {(() => {
+                    const verifiedStudents = enrollments
+                      .filter(s => s.feeStatus === 'Paid')
+                      .filter(s =>
+                        (s.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        (s.email || '').toLowerCase().includes(searchQuery.toLowerCase())
+                      );
+                    const visibleVerified = isTableExpanded('verified-students') ? verifiedStudents : verifiedStudents.slice(0, 3);
+                    return visibleVerified.map((student, i) => (
                     <tr key={student.id || i} className="border-b border-[var(--border-color)] hover:bg-white/5 transition-colors">
                       <td className="p-3">
                         <div className="font-bold text-sm">{student.name}</div>
@@ -2262,12 +2333,33 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                  ))})()}
                 </tbody>
               </table>
-              {enrollments.filter(s => s.feeStatus === 'Paid').length === 0 && (
-                <div className="text-center py-10 opacity-50 font-bold">No verified students found.</div>
-              )}
+              {(() => {
+                const verifiedStudents = enrollments
+                  .filter(s => s.feeStatus === 'Paid')
+                  .filter(s =>
+                    (s.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (s.email || '').toLowerCase().includes(searchQuery.toLowerCase())
+                  );
+                if (verifiedStudents.length === 0) {
+                  return <div className="text-center py-10 opacity-50 font-bold">No verified students found.</div>;
+                }
+                if (verifiedStudents.length > 3) {
+                  return (
+                    <div className="px-4 py-3 border-t border-[var(--border-color)] bg-white/5 flex justify-center">
+                      <button
+                        onClick={() => toggleTableExpanded('verified-students')}
+                        className="text-xs font-bold px-3 py-1 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20"
+                      >
+                        {isTableExpanded('verified-students') ? 'Collapse' : `Expand (${verifiedStudents.length - 3} more)`}
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
         )}
@@ -2312,18 +2404,20 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {leads
-                    .filter(l => 
-                      (l.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (l.phone || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (l.email || '').toLowerCase().includes(searchQuery.toLowerCase())
-                    )
-                    .sort((a, b) => {
-                      const da = a.createdAt?.seconds || 0;
-                      const db = b.createdAt?.seconds || 0;
-                      return db - da; // Newest first
-                    })
-                    .map((lead, i) => (
+                  {(() => {
+                    const filteredLeads = leads
+                      .filter(l =>
+                        (l.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        (l.phone || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        (l.email || '').toLowerCase().includes(searchQuery.toLowerCase())
+                      )
+                      .sort((a, b) => {
+                        const da = a.createdAt?.seconds || 0;
+                        const db = b.createdAt?.seconds || 0;
+                        return db - da;
+                      });
+                    const visibleLeads = isTableExpanded('leads') ? filteredLeads : filteredLeads.slice(0, 3);
+                    return visibleLeads.map((lead, i) => (
                     <tr key={lead.id || i} className="border-b border-[var(--border-color)] hover:bg-white/5 transition-colors">
                       <td className="p-3">
                         <div className="text-xs font-bold">
@@ -2379,12 +2473,33 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                  ))})()}
                 </tbody>
               </table>
-              {leads.length === 0 && (
-                <div className="text-center py-10 opacity-50 font-bold">No leads found.</div>
-              )}
+              {(() => {
+                const filteredLeads = leads
+                  .filter(l =>
+                    (l.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (l.phone || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (l.email || '').toLowerCase().includes(searchQuery.toLowerCase())
+                  );
+                if (filteredLeads.length === 0) {
+                  return <div className="text-center py-10 opacity-50 font-bold">No leads found.</div>;
+                }
+                if (filteredLeads.length > 3) {
+                  return (
+                    <div className="px-4 py-3 border-t border-[var(--border-color)] bg-white/5 flex justify-center">
+                      <button
+                        onClick={() => toggleTableExpanded('leads')}
+                        className="text-xs font-bold px-3 py-1 rounded-lg bg-teal-500/15 text-teal-500 hover:bg-teal-500/25"
+                      >
+                        {isTableExpanded('leads') ? 'Collapse' : `Expand (${filteredLeads.length - 3} more)`}
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
         )}
@@ -2774,13 +2889,13 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                     const todayDateStr = kolkataNow.toDateString();
                     const todayRoutines = routines.filter(r => r[today] && r[today] !== '-');
                     
-                    let addedCount = 0;
+                    let syncCount = 0;
                     const toastId = toast.loading('Syncing with Master Routine...');
                     
                     for (const r of todayRoutines) {
                       const existing = radars.find(rad => rad.routineId === r.id && rad.date === todayDateStr);
-                      if (!existing) {
-                        try {
+                      try {
+                        if (!existing) {
                           await firestoreService.addItem('radars', {
                             title: r[today],
                             time: r.startTime && r.endTime ? `${r.startTime} - ${r.endTime}` : (r.time || r.startTime || ''),
@@ -2792,20 +2907,32 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                             notes: '',
                             type: 'text',
                             fileUrl: '',
-                            externalUrl: ''
+                            externalUrl: '',
+                            autoSynced: true
                           });
-                          addedCount++;
-                        } catch (e) { console.error(e); }
+                          syncCount++;
+                        } else if (!existing.adminEdited) {
+                          await firestoreService.updateItem('radars', existing.id, {
+                            ...existing,
+                            title: r[today],
+                            time: r.startTime && r.endTime ? `${r.startTime} - ${r.endTime}` : (r.time || r.startTime || ''),
+                            startTime: r.startTime || r.time || '',
+                            endTime: r.endTime || '',
+                            status: existing.status === 'completed' ? 'upcoming' : (existing.status || 'upcoming'),
+                            autoSynced: true
+                          });
+                          syncCount++;
+                        }
+                      } catch (e) { console.error(e); }
                       }
-                    }
                     await radarService.markSynced();
-                    toast.success(`Sync complete! Added ${addedCount} classes.`, { id: toastId });
+                    toast.success(`Sync complete! Updated ${syncCount} classes.`, { id: toastId });
                   }}
                   className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
                 >
                   <RefreshCw size={14} /> Sync Now
                 </button>
-                <button onClick={() => openAddModal('radars', { title: '', startTime: '09:00 AM', endTime: '10:00 AM', time: '09:00 AM - 10:00 AM', link: '', status: 'upcoming', notes: '', instagramProfile: '', type: 'text', fileUrl: '', externalUrl: '', date: getKolkataTime().toDateString() })} className="px-3 py-1.5 bg-[var(--primary)] text-white rounded-lg text-xs font-bold hover:opacity-90 active:scale-95 transition-all shadow-lg shadow-[var(--primary)]/20">+ Add Manual Class</button>
+                <button onClick={() => openAddModal('radars', { title: '', startTime: '09:00 AM', endTime: '10:00 AM', time: '09:00 AM - 10:00 AM', link: '', status: 'upcoming', notes: '', instagramProfile: '', type: 'text', fileUrl: '', externalUrl: '', date: getKolkataTime().toDateString(), adminEdited: true })} className="px-3 py-1.5 bg-[var(--primary)] text-white rounded-lg text-xs font-bold hover:opacity-90 active:scale-95 transition-all shadow-lg shadow-[var(--primary)]/20">+ Add Manual Class</button>
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2860,7 +2987,7 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                   <textarea className="w-full p-2 bg-white/5 border border-[var(--border-color)] rounded text-sm" value={radar.notes || ''} onChange={e => setRadars(radars.map(r => r.id === radar.id ? {...r, notes: e.target.value} : r))} placeholder="Teacher's Note (e.g. Bring your lab manual)" />
                   <input className="w-full p-2 bg-white/5 border border-[var(--border-color)] rounded text-sm" value={radar.instagramProfile || ''} onChange={e => setRadars(radars.map(r => r.id === radar.id ? {...r, instagramProfile: e.target.value} : r))} placeholder="Teacher's Instagram Username / URL" />
                   <div className="flex gap-2">
-                    <button onClick={() => updateItem('radars', radar.id, radar)} className="flex-1 px-4 py-2 bg-[var(--success)] text-white rounded-lg text-sm font-bold hover:opacity-90 active:scale-95 transition-all">Save Radar Changes</button>
+                    <button onClick={() => updateItem('radars', radar.id, { ...radar, adminEdited: true })} className="flex-1 px-4 py-2 bg-[var(--success)] text-white rounded-lg text-sm font-bold hover:opacity-90 active:scale-95 transition-all">Save Radar Changes</button>
                     <button onClick={() => deleteItem('radars', radar.id)} className="px-4 py-2 bg-[var(--danger)] text-white rounded-lg text-sm font-bold hover:opacity-90 active:scale-95 transition-all">Delete</button>
                   </div>
                 </div>
@@ -3369,6 +3496,19 @@ export default function TabAdmin({ branding }: { branding?: any }) {
                     </select>
                   </div>
                   <input className="w-full p-3 bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white" value={newItemData.description} onChange={e => setNewItemData({...newItemData, description: e.target.value})} placeholder="Description" required />
+                  <textarea className="w-full p-3 bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white" value={newItemData.waitlistMessage || ''} onChange={e => setNewItemData({...newItemData, waitlistMessage: e.target.value})} placeholder="Waitlist Message (optional)" />
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <input type="color" className="w-full h-12 p-1 bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl" value={newItemData.waitlistTextColor || '#ef4444'} onChange={e => setNewItemData({...newItemData, waitlistTextColor: e.target.value})} />
+                    <select className="w-full p-3 bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white [&>option]:bg-white dark:[&>option]:bg-gray-900" value={newItemData.waitlistFontFamily || 'inherit'} onChange={e => setNewItemData({...newItemData, waitlistFontFamily: e.target.value})}>
+                      <option value="inherit">Default Font</option>
+                      <option value="Inter, sans-serif">Inter</option>
+                      <option value="Poppins, sans-serif">Poppins</option>
+                      <option value="Montserrat, sans-serif">Montserrat</option>
+                      <option value="serif">Serif</option>
+                      <option value="monospace">Monospace</option>
+                    </select>
+                    <input type="number" min={10} max={30} className="w-full p-3 bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white" value={newItemData.waitlistFontSize || 12} onChange={e => setNewItemData({...newItemData, waitlistFontSize: Number(e.target.value)})} placeholder="Font Size" />
+                  </div>
                   <div className="flex items-center gap-4 p-3 bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl">
                     <label className="text-xs font-bold opacity-70 text-gray-700 dark:text-gray-300">Status:</label>
                     <select 

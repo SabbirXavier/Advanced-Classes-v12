@@ -45,6 +45,7 @@ import {
   Legend
 } from 'recharts';
 import toast from 'react-hot-toast';
+import { pricingService } from '../services/pricingService';
 
 const CATEGORIES = {
   expense: ['Teacher Salary', 'Rent', 'Electricity', 'Wifi', 'Equipment', 'Promotional', 'Miscellaneous', 'Other'],
@@ -218,6 +219,18 @@ export default function FinanceModule() {
     pendingPayments.flatMap(e => (e.subjects || []) as string[])
   )).sort();
   const getPendingAmount = (e: any) => Math.max(0, Number(e.totalFee || 0) - Number(e.discount || 0) - Number(e.totalPaid || 0));
+  const syncMonthlyFeeCollections = async (e: any, amount: number, paymentId: string, txId = '') => {
+    const month = new Date().toISOString().slice(0, 7);
+    await pricingService.recordPaymentAndUpdateLedger({
+      studentId: e.id,
+      studentName: e.name || 'Unknown Student',
+      month,
+      amount: Number(amount || 0),
+      paymentId,
+      transactionId: txId,
+      mode: 'admin-finance',
+    });
+  };
   const filteredPendingPayments = pendingPayments
     .filter((e: any) => {
       const search = pendingFilters.search.trim().toLowerCase();
@@ -400,12 +413,6 @@ export default function FinanceModule() {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeView === 'ledger' ? 'bg-white dark:bg-[#1e1e1e] text-[var(--primary)] shadow-sm' : 'text-gray-500'}`}
         >
           Day Book
-        </button>
-        <button 
-          onClick={() => setActiveView('splits' as any)}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeView === 'splits' as any ? 'bg-white dark:bg-[#1e1e1e] text-[var(--primary)] shadow-sm' : 'text-gray-500'}`}
-        >
-          Splits Ledger (Payroll)
         </button>
         <button 
           onClick={() => setActiveView('fees')}
@@ -872,6 +879,8 @@ Please clear your pending dues at the earliest.`;
                         isDistributed: false
                       });
 
+                      await syncMonthlyFeeCollections(e, paidAmount, `admin_offline_${Date.now()}`);
+
                       toast.success('Payment recorded & 50-50 split generated.');
                     }}
                     className="flex-1 sm:flex-none px-4 py-2 bg-green-500 text-white rounded-xl text-xs font-bold hover:scale-105 transition-all"
@@ -990,6 +999,8 @@ Please clear your pending dues to continue accessing batch materials.`;
                                 enrollmentId: e.id,
                                 isDistributed: false
                               });
+
+                              await syncMonthlyFeeCollections(e, paidAmount, ph.id || `proof_${Date.now()}`, ph.transactionId || '');
 
                               toast.success('Proof Verified & Ledger Generated!');
                             }}

@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { channelService, Channel } from '../services/channelService';
-import { MessageSquare, LayoutTemplate, Trash2 } from 'lucide-react';
+import { MessageSquare, LayoutTemplate, Trash2, CheckCheck } from 'lucide-react';
+import toast from 'react-hot-toast';
 import ChatRoom from './ChatRoom';
 
 export default function AdminSupportTickets({ user, userData }: { user: any, userData: any }) {
@@ -33,6 +34,18 @@ export default function AdminSupportTickets({ user, userData }: { user: any, use
     }
   };
 
+  const handleClose = async (e: React.MouseEvent, ticketId: string) => {
+    e.stopPropagation();
+    if (!window.confirm('Mark this ticket as solved and auto-delete it in 10 seconds?')) return;
+    try {
+      await channelService.closeSupportTicket(ticketId, user?.uid || 'admin');
+      toast.success('Ticket marked as solved. Auto-delete in 10 seconds.');
+    } catch (err) {
+      console.error('Failed to close ticket', err);
+      toast.error('Failed to close ticket');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -59,6 +72,13 @@ export default function AdminSupportTickets({ user, userData }: { user: any, use
                  >
                    <div className="font-bold pr-8">{ticket.name}</div>
                    <div className="text-xs opacity-60 truncate pr-8">{ticket.description}</div>
+                 </button>
+                 <button
+                   onClick={(e) => handleClose(e, ticket.id)}
+                   className="absolute right-12 top-1/2 -translate-y-1/2 p-2 text-white/40 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition-all"
+                   title="Mark solved"
+                 >
+                   <CheckCheck size={16} />
                  </button>
                  <button 
                    onClick={(e) => handleDelete(e, ticket.id)}
