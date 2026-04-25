@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Moon, Sun, LogOut, Shield, Edit2, Check, X, MessageSquare, Image as ImageIcon, Camera, ZoomIn, Link as LinkIcon, Play, AlertTriangle } from 'lucide-react';
+import { User, Moon, Sun, LogOut, Shield, Edit2, Check, X, MessageCircle, HelpCircle, Image as ImageIcon, Camera, ZoomIn, Link as LinkIcon, Play, AlertTriangle, Mail } from 'lucide-react';
 import { authService, UserProfile } from '../services/authService';
 import { auth, db, storage } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -328,6 +328,19 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
   const [name, setName] = useState('');
   const [authError, setAuthError] = useState('');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [supportTicketPopup, setSupportTicketPopup] = useState<{ open: boolean; ticketId: string }>({ open: false, ticketId: '' });
+
+  const toUserFriendlyAuthError = (err: any) => {
+    const code = String(err?.code || '').toLowerCase();
+    if (code.includes('wrong-password') || code.includes('invalid-password')) return 'Wrong password. Please try again.';
+    if (code.includes('invalid-credential')) return 'Invalid phone/email or password. Please check and try again.';
+    if (code.includes('user-not-found')) return 'Account not found. Please sign up first.';
+    if (code.includes('invalid-email')) return 'Invalid email format.';
+    if (code.includes('invalid-phone-number')) return 'Invalid phone number.';
+    if (code.includes('too-many-requests')) return 'Too many attempts. Please wait a few minutes.';
+    if (code.includes('email-already-in-use')) return 'This account is already registered.';
+    return 'Authentication failed. Please check your details and try again.';
+  };
 
   const handleGoogleLogin = async () => {
     try {
@@ -356,10 +369,7 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
       }
     } catch (err: any) {
       console.error('Phone auth failed', err);
-      if (err.code === 'auth/user-not-found') setAuthError('User not found');
-      else if (err.code === 'auth/wrong-password') setAuthError('Incorrect password');
-      else if (err.code === 'auth/email-already-in-use') setAuthError('Phone number already registered');
-      else setAuthError(err.message || 'Authentication failed');
+      setAuthError(toUserFriendlyAuthError(err));
     } finally {
       setIsAuthenticating(false);
     }
@@ -778,7 +788,7 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
                 >
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-[#25D366]/20 text-[#25D366] rounded-xl">
-                      <MessageSquare size={18} />
+                      <MessageCircle size={18} />
                     </div>
                     <div className="text-left">
                       <p className="font-bold text-[#25D366]">WhatsApp Support</p>
@@ -814,7 +824,7 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
                       });
                       // Store the active ticket id in localStorage and navigate
                       localStorage.setItem('activeSupportTicket', ticketId);
-                      onNavigate('support_chat');
+                      setSupportTicketPopup({ open: true, ticketId });
                     } catch (e) {
                       console.error('Failed to create ticket', e);
                     }
@@ -823,11 +833,30 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
                 >
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-indigo-500/20 text-indigo-500 rounded-xl">
-                      <MessageSquare size={18} />
+                      <HelpCircle size={18} />
                     </div>
                     <div className="text-left">
                       <p className="font-bold text-indigo-400">In-App Chat Support</p>
                       <p className="text-xs text-indigo-400/70">Create a support ticket directly</p>
+                    </div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => {
+                    const email = import.meta.env.VITE_SUPPORT_EMAIL || import.meta.env.VITE_ADMIN_EMAIL || 'support@advancedclasses.com';
+                    const subject = encodeURIComponent('Support Request');
+                    const body = encodeURIComponent('Hello Support Team,\n\nI need help with:');
+                    window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank');
+                  }}
+                  className="w-full flex items-center justify-between p-4 bg-slate-500/10 border border-slate-500/20 rounded-2xl hover:bg-slate-500/20 transition-all group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-slate-500/20 text-slate-300 rounded-xl">
+                      <Mail size={18} />
+                    </div>
+                    <div className="text-left">
+                      <p className="font-bold text-slate-200">Email Support</p>
+                      <p className="text-xs text-slate-300/70">Send a support email directly from your device</p>
                     </div>
                   </div>
                 </button>
@@ -874,6 +903,32 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
           </div>
         )}
       </div>
+      {supportTicketPopup.open && (
+        <div className="fixed inset-0 z-[3000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl border border-indigo-500/30 bg-[#121420] p-6 space-y-4">
+            <h3 className="text-lg font-black text-indigo-400">Support Channel Created</h3>
+            <p className="text-sm opacity-80">Your in-app support ticket has been created successfully.</p>
+            <p className="text-[11px] opacity-50 font-mono break-all">{supportTicketPopup.ticketId}</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setSupportTicketPopup({ open: false, ticketId: '' });
+                  onNavigate('support_chat');
+                }}
+                className="flex-1 py-2 rounded-xl bg-indigo-500 text-white font-bold text-sm"
+              >
+                Open Ticket Channel
+              </button>
+              <button
+                onClick={() => setSupportTicketPopup({ open: false, ticketId: '' })}
+                className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-sm"
+              >
+                Later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

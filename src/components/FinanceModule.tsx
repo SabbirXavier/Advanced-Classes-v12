@@ -45,6 +45,7 @@ import {
   Legend
 } from 'recharts';
 import toast from 'react-hot-toast';
+import { pricingService } from '../services/pricingService';
 
 const CATEGORIES = {
   expense: ['Teacher Salary', 'Rent', 'Electricity', 'Wifi', 'Equipment', 'Promotional', 'Miscellaneous', 'Other'],
@@ -82,6 +83,15 @@ export default function FinanceModule() {
   const [financeLedgers, setFinanceLedgers] = useState<any[]>([]);
 
   const [feesData, setFeesData] = useState<any[]>([]);
+  const [pendingFilters, setPendingFilters] = useState({
+    search: '',
+    grade: 'ALL',
+    subject: 'ALL',
+    status: 'ALL',
+    minDue: '',
+    maxDue: '',
+    sortBy: 'due_desc' as 'due_desc' | 'due_asc' | 'name_asc' | 'name_desc',
+  });
 
   useEffect(() => {
     const unsubFinances = firestoreService.listenToCollection('finances', (data) => {
@@ -205,6 +215,44 @@ export default function FinanceModule() {
   }, []);
 
   const pendingPayments = enrollments.filter(e => e.feeStatus !== 'Paid');
+  const pendingSubjects = Array.from(new Set(
+    pendingPayments.flatMap(e => (e.subjects || []) as string[])
+  )).sort();
+  const getPendingAmount = (e: any) => Math.max(0, Number(e.totalFee || 0) - Number(e.discount || 0) - Number(e.totalPaid || 0));
+  const syncMonthlyFeeCollections = async (e: any, amount: number, paymentId: string, txId = '') => {
+    const month = new Date().toISOString().slice(0, 7);
+    await pricingService.recordPaymentAndUpdateLedger({
+      studentId: e.id,
+      studentName: e.name || 'Unknown Student',
+      month,
+      amount: Number(amount || 0),
+      paymentId,
+      transactionId: txId,
+      mode: 'admin-finance',
+    });
+  };
+  const filteredPendingPayments = pendingPayments
+    .filter((e: any) => {
+      const search = pendingFilters.search.trim().toLowerCase();
+      const due = getPendingAmount(e);
+      const statusOk = pendingFilters.status === 'ALL' ? true : (e.feeStatus || 'Pending') === pendingFilters.status;
+      const gradeOk = pendingFilters.grade === 'ALL' ? true : (e.grade || '') === pendingFilters.grade;
+      const subjectOk = pendingFilters.subject === 'ALL'
+        ? true
+        : (e.subjects || []).includes(pendingFilters.subject);
+      const searchOk = !search
+        ? true
+        : `${e.name || ''} ${e.email || ''} ${e.whatsapp || ''}`.toLowerCase().includes(search);
+      const minOk = pendingFilters.minDue === '' ? true : due >= Number(pendingFilters.minDue);
+      const maxOk = pendingFilters.maxDue === '' ? true : due <= Number(pendingFilters.maxDue);
+      return statusOk && gradeOk && subjectOk && searchOk && minOk && maxOk;
+    })
+    .sort((a: any, b: any) => {
+      if (pendingFilters.sortBy === 'due_desc') return getPendingAmount(b) - getPendingAmount(a);
+      if (pendingFilters.sortBy === 'due_asc') return getPendingAmount(a) - getPendingAmount(b);
+      if (pendingFilters.sortBy === 'name_desc') return (b.name || '').localeCompare(a.name || '');
+      return (a.name || '').localeCompare(b.name || '');
+    });
   
   // Advance fee prediction: count students enrolled but might need next month payment
   // For demo, just showing pending.
@@ -667,31 +715,97 @@ export default function FinanceModule() {
             className="space-y-4"
           >
             {pendingPayments.length > 0 && (
+              <div className="glass-card p-4 space-y-3 border-amber-500/20">
+                <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Search student / phone"
+                    value={pendingFilters.search}
+                    onChange={(e) => setPendingFilters(prev => ({ ...prev, search: e.target.value }))}
+                    className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs outline-none"
+                  />
+                  <select
+                    value={pendingFilters.grade}
+                    onChange={(e) => setPendingFilters(prev => ({ ...prev, grade: e.target.value }))}
+                    className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs outline-none"
+                  >
+                    <option value="ALL">All Classes</option>
+                    {['IX', 'X', 'XI', 'XII'].map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                  <select
+                    value={pendingFilters.subject}
+                    onChange={(e) => setPendingFilters(prev => ({ ...prev, subject: e.target.value }))}
+                    className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs outline-none"
+                  >
+                    <option value="ALL">All Subjects</option>
+                    {pendingSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <input
+                    type="number"
+                    placeholder="Min Due"
+                    value={pendingFilters.minDue}
+                    onChange={(e) => setPendingFilters(prev => ({ ...prev, minDue: e.target.value }))}
+                    className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs outline-none"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Max Due"
+                    value={pendingFilters.maxDue}
+                    onChange={(e) => setPendingFilters(prev => ({ ...prev, maxDue: e.target.value }))}
+                    className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs outline-none"
+                  />
+                  <select
+                    value={pendingFilters.sortBy}
+                    onChange={(e) => setPendingFilters(prev => ({ ...prev, sortBy: e.target.value as any }))}
+                    className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs outline-none"
+                  >
+                    <option value="due_desc">Due: High to Low</option>
+                    <option value="due_asc">Due: Low to High</option>
+                    <option value="name_asc">Name: A-Z</option>
+                    <option value="name_desc">Name: Z-A</option>
+                  </select>
+                  <div className="text-[11px] font-bold px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                    Showing {filteredPendingPayments.length}/{pendingPayments.length}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {pendingPayments.length > 0 && (
               <div className="flex justify-end pr-2">
                 <button 
                   onClick={() => {
-                    const count = pendingPayments.length;
+                    const count = filteredPendingPayments.length;
                     if (!confirm(`This will prepare reminders for ${count} students. Continue?`)) return;
                     toast.success('Check your browser tabs! Reminders prepared.');
-                    pendingPayments.forEach((e, idx) => {
+                    filteredPendingPayments.forEach((e, idx) => {
                       setTimeout(() => {
                         const msg = `*PAYMENT REMINDER*
 👤 *Student:* ${e.name}
-💰 *Dues:* ₹${e.totalFee - (e.discount || 0)}
+💰 *Dues:* ₹${getPendingAmount(e)}
 📅 *Status:* ${e.feeStatus}
 
 Please clear your pending dues at the earliest.`;
                         window.open(`https://wa.me/${e.whatsapp?.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`, '_blank');
+                        firestoreService.addItem('reminder_logs', {
+                          studentId: e.id,
+                          studentName: e.name,
+                          phone: e.whatsapp || '',
+                          mode: 'bulk',
+                          status: 'link_opened',
+                          channel: 'whatsapp',
+                          messageSnapshot: msg
+                        }).catch(console.error);
                       }, idx * 500); // Stagger popups
                     });
                   }}
                   className="px-4 py-2 bg-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2"
                 >
-                  <MessageCircle size={14} /> Bulk WhatsApp Nudge ({pendingPayments.length})
+                  <MessageCircle size={14} /> WhatsApp/Sms Fee Reminder (API) ({filteredPendingPayments.length})
                 </button>
               </div>
             )}
-            {pendingPayments.map(e => (
+            {filteredPendingPayments.map(e => (
               <div key={e.id} className="glass-card p-4 flex flex-col gap-4 border-amber-500/10">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between w-full gap-4">
                   <div className="flex items-center gap-4">
@@ -706,6 +820,7 @@ Please clear your pending dues at the earliest.`;
                       <div className="flex gap-2 mt-1">
                         <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-white/5 rounded text-[8px] font-bold">Grade {e.grade}</span>
                         <span className="px-1.5 py-0.5 bg-[var(--primary)]/10 text-[var(--primary)] rounded text-[8px] font-bold">₹{e.totalFee} Total</span>
+                        <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-500 rounded text-[8px] font-bold">₹{getPendingAmount(e)} Pending</span>
                       </div>
                     </div>
                   </div>
@@ -770,26 +885,37 @@ Please clear your pending dues at the earliest.`;
                         isDistributed: false
                       });
 
+                      await syncMonthlyFeeCollections(e, paidAmount, `admin_offline_${Date.now()}`);
+
                       toast.success('Payment recorded & 50-50 split generated.');
                     }}
                     className="flex-1 sm:flex-none px-4 py-2 bg-green-500 text-white rounded-xl text-xs font-bold hover:scale-105 transition-all"
                   >
                     Accept Payment (Offline)
                   </button>
-                  <button 
-                    onClick={() => {
-                      const msg = `*PAYMENT REMINDER*
+                    <button 
+                      onClick={() => {
+                        const msg = `*PAYMENT REMINDER*
 👤 *Student:* ${e.name}
 📚 *Batch:* ${e.grade}
-💰 *Dues:* ₹${e.totalFee - (e.discount || 0)}
+💰 *Dues:* ₹${getPendingAmount(e)}
 📅 *Status:* ${e.feeStatus}
 
 Please clear your pending dues to continue accessing batch materials.`;
-                      window.open(`https://wa.me/${e.whatsapp?.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`, '_blank');
-                    }}
-                    className="flex-1 sm:flex-none px-4 py-2 bg-indigo-500/10 text-indigo-500 rounded-xl text-xs font-bold flex justify-center items-center gap-2"
-                  >
-                    Reminder
+                        window.open(`https://wa.me/${e.whatsapp?.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`, '_blank');
+                        firestoreService.addItem('reminder_logs', {
+                          studentId: e.id,
+                          studentName: e.name,
+                          phone: e.whatsapp || '',
+                          mode: 'single',
+                          status: 'link_opened',
+                          channel: 'whatsapp',
+                          messageSnapshot: msg
+                        }).catch(console.error);
+                      }}
+                      className="flex-1 sm:flex-none px-4 py-2 bg-indigo-500/10 text-indigo-500 rounded-xl text-xs font-bold flex justify-center items-center gap-2"
+                    >
+                    Send WhatsApp Reminder (Whatsapp Web App Reminder)
                   </button>
                 </div>
               </div>
@@ -880,6 +1006,8 @@ Please clear your pending dues to continue accessing batch materials.`;
                                 isDistributed: false
                               });
 
+                              await syncMonthlyFeeCollections(e, paidAmount, ph.id || `proof_${Date.now()}`, ph.transactionId || '');
+
                               toast.success('Proof Verified & Ledger Generated!');
                             }}
                             className="px-3 py-1.5 bg-green-500/10 text-green-500 rounded-lg text-xs font-bold hover:bg-green-500/20"
@@ -916,9 +1044,9 @@ Please clear your pending dues to continue accessing batch materials.`;
                 )}
               </div>
             ))}
-            {pendingPayments.length === 0 && (
+            {filteredPendingPayments.length === 0 && (
               <div className="p-20 text-center glass-card opacity-30 italic">
-                All clear! No pending payments found.
+                No pending records found for selected filters.
               </div>
             )}
           </motion.div>
