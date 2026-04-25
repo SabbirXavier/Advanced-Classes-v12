@@ -17,7 +17,8 @@ import {
   X,
   MicOff,
   ShieldAlert,
-  Clock
+  Clock,
+  CheckCheck
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
@@ -105,6 +106,26 @@ export default function TabStudyHub({ branding, isDarkMode, toggleDarkMode }: Ta
     }
   };
 
+  const handleDeleteChannel = async () => {
+    if (!settingsChannel) return;
+    if (['general', 'resources', 'announcements', 'help'].includes(settingsChannel.id)) {
+      toast.error('Default channels cannot be deleted.');
+      return;
+    }
+    if (!window.confirm(`Delete #${settingsChannel.name}? This action cannot be undone.`)) return;
+    try {
+      await channelService.deleteChannel(settingsChannel.id);
+      toast.success('Channel deleted');
+      if (activeChannel === settingsChannel.id) {
+        setActiveChannel('general');
+      }
+      setSettingsChannel(null);
+    } catch (err) {
+      console.error('Failed to delete channel:', err);
+      toast.error('Failed to delete channel');
+    }
+  };
+
   // Auth initialization
   useEffect(() => {
     let unsubscribeDoc: () => void;
@@ -168,6 +189,25 @@ export default function TabStudyHub({ branding, isDarkMode, toggleDarkMode }: Ta
 
   const activeChannelObj = useMemo(() => channels.find(c => c.id === activeChannel) || null, [channels, activeChannel]);
   const visibleChannels = useMemo(() => channels.filter(ch => hasPermission(ch, user, userData, 'view')), [channels, user, userData]);
+  const canCloseActiveTicket = useMemo(() => {
+    if (!activeChannelObj?.isSupportTicket || !user) return false;
+    const isAdmin = userData?.role === 'admin' || userData?.role === 'moderator';
+    const isOwner = activeChannelObj.ticketOwnerId === user.uid;
+    return isAdmin || isOwner;
+  }, [activeChannelObj, user, userData?.role]);
+
+  const handleCloseTicket = async () => {
+    if (!activeChannelObj || !canCloseActiveTicket || !user) return;
+    const ok = window.confirm('Mark this ticket as solved and auto-delete it after 10 seconds?');
+    if (!ok) return;
+    try {
+      await channelService.closeSupportTicket(activeChannelObj.id, user.uid);
+      toast.success('Ticket marked as solved. It will auto-delete in 10 seconds.');
+    } catch (error) {
+      console.error('Failed to close ticket:', error);
+      toast.error('Failed to close ticket');
+    }
+  };
 
   const handleGoogleLogin = async () => {
     try {
@@ -325,6 +365,16 @@ export default function TabStudyHub({ branding, isDarkMode, toggleDarkMode }: Ta
           </div>
 
           <div className="flex items-center gap-3">
+            {activeChannelObj?.isSupportTicket && canCloseActiveTicket && (
+              <button
+                onClick={handleCloseTicket}
+                className="px-2.5 py-1.5 rounded-md text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors inline-flex items-center gap-1.5"
+                title="Mark ticket as solved"
+              >
+                <CheckCheck size={14} />
+                Ticket Close
+              </button>
+            )}
             <button 
               onClick={() => setIsSearchOpen(!isSearchOpen)}
               className={`p-1.5 rounded-md transition-colors ${isSearchOpen ? 'bg-[var(--primary)] text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5'}`}
@@ -570,6 +620,12 @@ export default function TabStudyHub({ branding, isDarkMode, toggleDarkMode }: Ta
               </div>
 
               <div className="p-6 bg-gray-50 dark:bg-black/20 flex gap-3">
+                <button
+                  onClick={handleDeleteChannel}
+                  className="py-3 px-4 bg-red-500/10 text-red-500 border border-red-500/30 rounded-xl font-bold text-sm hover:bg-red-500/20 transition-all"
+                >
+                  Delete Channel
+                </button>
                 <button 
                   onClick={() => setSettingsChannel(null)}
                   className="flex-1 py-3 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl font-bold text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition-all"
