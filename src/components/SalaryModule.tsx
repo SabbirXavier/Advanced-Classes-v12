@@ -292,17 +292,10 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     () => calculateNetReceivable(mySalaryInfo, selectedMonth),
     [mySalaryInfo, attendance, selectedMonth, payouts, monthlyFeeLedger, enrollments, facultyBatches, requests]
   );
-  const myMonthBreakdown = useMemo(
-    () => getMonthlySalaryBreakdown(mySalaryInfo, selectedMonth),
-    [mySalaryInfo, selectedMonth, attendance, enrollments, monthlyFeeLedger, facultyBatches]
-  );
-  const selectedMonthLabel = useMemo(
-    () => new Date(`${selectedMonth}-01`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-    [selectedMonth]
-  );
   const displayBalance = useMemo(() => {
-    return Math.max(0, estimatedModelReceivable);
-  }, [estimatedModelReceivable]);
+    if (isPerStudentModel) return myBalance;
+    return Math.max(0, estimatedModelReceivable - paidOutTotal);
+  }, [isPerStudentModel, myBalance, estimatedModelReceivable, paidOutTotal]);
 
   const saveSalarySettings = async (facId: string, data: any) => {
     try {
@@ -463,15 +456,15 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                     <div className="flex gap-8 z-10">
                       <div>
                         <div className="text-4xl font-black text-green-500">
-                          {myMonthBreakdown.paidStudentsCount}
+                          {enrollments.filter(e => e.feeStatus === 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
                         </div>
-                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Paid ({selectedMonthLabel})</div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Earned (Paid)</div>
                       </div>
                       <div>
                         <div className="text-4xl font-black text-amber-500">
-                          {myMonthBreakdown.unpaidStudentsCount}
+                          {enrollments.filter(e => e.feeStatus !== 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
                         </div>
-                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Pending ({selectedMonthLabel})</div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Pending Unpaid</div>
                       </div>
                     </div>
                   </>
@@ -504,7 +497,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                 </div>
                 <div className="mt-4 flex flex-col gap-1">
                   <span className="text-[10px] opacity-60">
-                    {isPerStudentModel ? `Monthly earnings for ${selectedMonthLabel}` : 'Attendance-linked monthly net earnings'}
+                    {isPerStudentModel ? 'Total earnings from paid enrollments' : 'Attendance-linked net earnings after disbursement'}
                   </span>
                   <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden mt-1">
                     <motion.div 

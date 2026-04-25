@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Moon, Sun, LogOut, Shield, Edit2, Check, X, MessageCircle, HelpCircle, Image as ImageIcon, Camera, ZoomIn, Link as LinkIcon, Play, AlertTriangle, Mail as MailIcon } from 'lucide-react';
+import { User, Moon, Sun, LogOut, Shield, Edit2, Check, X, MessageCircle, HelpCircle, Image as ImageIcon, Camera, ZoomIn, Link as LinkIcon, Play, AlertTriangle } from 'lucide-react';
 import { authService, UserProfile } from '../services/authService';
 import { auth, db, storage } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';

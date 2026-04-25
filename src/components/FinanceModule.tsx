@@ -219,18 +219,6 @@ export default function FinanceModule() {
     pendingPayments.flatMap(e => (e.subjects || []) as string[])
   )).sort();
   const getPendingAmount = (e: any) => Math.max(0, Number(e.totalFee || 0) - Number(e.discount || 0) - Number(e.totalPaid || 0));
-  const syncMonthlyFeeCollections = async (e: any, amount: number, paymentId: string, txId = '') => {
-    const month = new Date().toISOString().slice(0, 7);
-    await pricingService.recordPaymentAndUpdateLedger({
-      studentId: e.id,
-      studentName: e.name || 'Unknown Student',
-      month,
-      amount: Number(amount || 0),
-      paymentId,
-      transactionId: txId,
-      mode: 'admin-finance',
-    });
-  };
   const filteredPendingPayments = pendingPayments
     .filter((e: any) => {
       const search = pendingFilters.search.trim().toLowerCase();
