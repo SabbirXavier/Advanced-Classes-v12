@@ -9,6 +9,7 @@ import {
   Clock, 
   Search,
   ChevronRight,
+  ChevronDown,
   Filter,
   AlertCircle,
   FileText,
@@ -74,6 +75,9 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
   const [extraStudentMeta, setExtraStudentMeta] = useState<Record<string, {name: string; whatsapp?: string}>>({});
   const [showAddStudentForm, setShowAddStudentForm] = useState(false);
   const [newStudentData, setNewStudentData] = useState({ name: '', whatsapp: '' });
+  const [facultyReportSortBy, setFacultyReportSortBy] = useState<'date_desc' | 'date_asc' | 'name_asc' | 'name_desc' | 'status'>('date_desc');
+  const [showTodayFacultyExpanded, setShowTodayFacultyExpanded] = useState(false);
+  const [showYesterdayFacultyExpanded, setShowYesterdayFacultyExpanded] = useState(false);
 
   const facultyAssignedSubject = React.useMemo(() => {
     if (isAdmin || !isFaculty || !selectedBatch) return null;
@@ -89,6 +93,25 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
 
   const todayFaculty = facultyAttendance.filter(a => a.dateStr === todayDateStr && a.isApproved);
   const yesterdayFaculty = facultyAttendance.filter(a => a.dateStr === yesterdayDateStr && a.isApproved);
+  const sortedFacultyAttendance = React.useMemo(() => {
+    const sorted = [...facultyAttendance];
+    sorted.sort((a, b) => {
+      if (facultyReportSortBy === 'date_asc') {
+        return (a.date?.seconds || 0) - (b.date?.seconds || 0);
+      }
+      if (facultyReportSortBy === 'name_asc') {
+        return (a.userName || '').localeCompare(b.userName || '');
+      }
+      if (facultyReportSortBy === 'name_desc') {
+        return (b.userName || '').localeCompare(a.userName || '');
+      }
+      if (facultyReportSortBy === 'status') {
+        return Number(Boolean(a.isApproved)) - Number(Boolean(b.isApproved));
+      }
+      return (b.date?.seconds || 0) - (a.date?.seconds || 0);
+    });
+    return sorted;
+  }, [facultyAttendance, facultyReportSortBy]);
 
   useEffect(() => {
     if (facultyAssignedSubject && facultyAssignedSubject !== 'ALL') {
@@ -1418,7 +1441,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                       a.download = `student_attendance_${new Date().toISOString().split('T')[0]}.csv`;
                       a.click();
                     } else {
-                      const dataToExport = facultyAttendance;
+                      const dataToExport = sortedFacultyAttendance;
                       if (dataToExport.length === 0) return toast.error('No data to export');
                       let csv = 'Date,Faculty Name,Email,Status,Disapproval Reason\n' + dataToExport.map(r => `${r.dateStr},${r.userName},${r.userEmail},${r.isApproved ? 'Approved' : 'Disapproved'},${r.disapprovalReason || ''}`).join('\n');
                       const blob = new Blob([csv], { type: 'text/csv' });
@@ -1473,10 +1496,21 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
               <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                    <div className="glass-card p-6 border-l-4 border-emerald-500">
-                      <h4 className="text-xs font-black opacity-50 uppercase tracking-widest mb-4">Today's Present Faculties</h4>
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-xs font-black opacity-50 uppercase tracking-widest">Today's Present Faculties</h4>
+                        {todayFaculty.length > 5 && (
+                          <button
+                            onClick={() => setShowTodayFacultyExpanded(prev => !prev)}
+                            className="text-[10px] font-black uppercase px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 flex items-center gap-1"
+                          >
+                            {showTodayFacultyExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            {showTodayFacultyExpanded ? 'Collapse' : 'Expand'}
+                          </button>
+                        )}
+                      </div>
                       <div className="text-4xl font-black text-emerald-500 mb-2">{todayFaculty.length}</div>
                       <div className="space-y-2">
-                        {todayFaculty.map(f => (
+                        {(showTodayFacultyExpanded ? todayFaculty : todayFaculty.slice(0, 5)).map(f => (
                            <div key={`today-${f.id}`} className="text-xs flex justify-between bg-white/5 p-2 rounded">
                              <span className="font-bold">{f.userName}</span>
                              <span className="opacity-50">{new Date(f.date?.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
@@ -1486,10 +1520,21 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                       </div>
                    </div>
                    <div className="glass-card p-6 border-l-4 border-blue-500">
-                      <h4 className="text-xs font-black opacity-50 uppercase tracking-widest mb-4">Yesterday's Present Faculties</h4>
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-xs font-black opacity-50 uppercase tracking-widest">Yesterday's Present Faculties</h4>
+                        {yesterdayFaculty.length > 5 && (
+                          <button
+                            onClick={() => setShowYesterdayFacultyExpanded(prev => !prev)}
+                            className="text-[10px] font-black uppercase px-2 py-1 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 flex items-center gap-1"
+                          >
+                            {showYesterdayFacultyExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            {showYesterdayFacultyExpanded ? 'Collapse' : 'Expand'}
+                          </button>
+                        )}
+                      </div>
                       <div className="text-4xl font-black text-blue-500 mb-2">{yesterdayFaculty.length}</div>
                       <div className="space-y-2">
-                        {yesterdayFaculty.map(f => (
+                        {(showYesterdayFacultyExpanded ? yesterdayFaculty : yesterdayFaculty.slice(0, 5)).map(f => (
                            <div key={`yest-${f.id}`} className="text-xs flex justify-between bg-white/5 p-2 rounded">
                              <span className="font-bold">{f.userName}</span>
                              <span className="opacity-50">{new Date(f.date?.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
@@ -1504,6 +1549,19 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                  <h3 className="text-lg font-bold flex items-center gap-2 text-amber-500 mb-4">
                    <AlertCircle size={20} /> Faculty Attendance Moderation
                  </h3>
+                 <div className="mb-4 flex justify-end">
+                   <select
+                     value={facultyReportSortBy}
+                     onChange={(e) => setFacultyReportSortBy(e.target.value as any)}
+                     className="p-2 bg-white/5 border border-white/10 rounded-xl outline-none text-xs font-bold [&>option]:bg-gray-900"
+                   >
+                     <option value="date_desc">Sort: Date (Newest)</option>
+                     <option value="date_asc">Sort: Date (Oldest)</option>
+                     <option value="name_asc">Sort: Name (A-Z)</option>
+                     <option value="name_desc">Sort: Name (Z-A)</option>
+                     <option value="status">Sort: Status</option>
+                   </select>
+                 </div>
                  <div className="overflow-x-auto">
                    <table className="w-full text-left">
                      <thead className="text-[10px] font-black uppercase opacity-40">
@@ -1515,7 +1573,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                        </tr>
                      </thead>
                      <tbody className="divide-y divide-white/5 text-sm">
-                        {facultyAttendance.map(a => (
+                        {sortedFacultyAttendance.map(a => (
                           <tr key={a.id} className="hover:bg-white/5">
                             <td className="p-4">
                               <div className="font-bold">{a.userName}</div>
@@ -1559,7 +1617,7 @@ export default function AttendanceModule({ user, isAdmin, isFaculty, facultyBatc
                             </td>
                           </tr>
                         ))}
-                        {facultyAttendance.length === 0 && (
+                        {sortedFacultyAttendance.length === 0 && (
                           <tr><td colSpan={4} className="p-10 text-center opacity-40 italic">No attendance records found yet.</td></tr>
                         )}
                      </tbody>

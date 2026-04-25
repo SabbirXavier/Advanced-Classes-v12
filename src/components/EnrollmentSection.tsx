@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Link as LinkIcon, AlertCircle, CheckCircle, UserPlus, X, Settings, Edit, Trash2, Check, FileText, Lock, Download, FileUp, DollarSign } from 'lucide-react';
+import { Plus, Link as LinkIcon, AlertCircle, CheckCircle, UserPlus, X, Settings, Edit, Trash2, Check, FileText, Lock, Download, FileUp, DollarSign, ChevronDown, ChevronRight } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import toast, { Toaster } from 'react-hot-toast';
 import { firestoreService } from '../services/firestoreService';
@@ -31,6 +31,7 @@ export default function EnrollmentSection() {
   const [isImporting, setIsImporting] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [expandedBatchStudents, setExpandedBatchStudents] = useState<Record<string, boolean>>({});
 
   const handleLogPayment = async () => {
     if (!selectedStudent || !paymentAmount) return;
@@ -183,6 +184,10 @@ export default function EnrollmentSection() {
 
   const renderBatch = (gradeTitle: string, gradeLevel: string) => {
     const batchStudents = enrollments.filter(s => s.grade === gradeLevel);
+    const isExpanded = !!expandedBatchStudents[gradeLevel];
+    const previewLimit = 6;
+    const visibleBatchStudents = isExpanded ? batchStudents : batchStudents.slice(0, previewLimit);
+    const hiddenCount = Math.max(0, batchStudents.length - previewLimit);
     if (gradeLevel !== 'XII' && gradeLevel !== 'XI' && gradeLevel !== 'X') return null;
     
     // Find matching batch config
@@ -233,8 +238,9 @@ export default function EnrollmentSection() {
           {batchStudents.length === 0 ? (
             <p className="text-sm opacity-50 text-center py-4">No students enrolled yet. Be the first!</p>
           ) : (
-            <ul className="space-y-2">
-              {batchStudents.map(student => (
+            <>
+              <ul className="space-y-2">
+                {visibleBatchStudents.map(student => (
                 <li 
                   key={student.id} 
                   className={`flex items-center justify-between bg-white/50 dark:bg-black/20 p-2.5 rounded-xl border border-white/10 ${isAdmin ? 'cursor-pointer hover:bg-white/80 dark:hover:bg-white/5' : ''}`}
@@ -262,8 +268,19 @@ export default function EnrollmentSection() {
                     )}
                   </div>
                 </li>
-              ))}
-            </ul>
+                ))}
+              </ul>
+
+              {batchStudents.length > previewLimit && (
+                <button
+                  onClick={() => setExpandedBatchStudents((prev) => ({ ...prev, [gradeLevel]: !prev[gradeLevel] }))}
+                  className="mt-3 w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20 transition-all"
+                >
+                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  {isExpanded ? 'Collapse Student List' : `Expand Student List (${hiddenCount} more)`}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
