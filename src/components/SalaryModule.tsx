@@ -37,7 +37,7 @@ interface SalaryModuleProps {
 }
 
 export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches }: SalaryModuleProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'payouts' | 'student-payments'>(isAdmin ? 'settings' : 'overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'payouts' | 'student-payments' | 'admin-earnings'>(isAdmin ? 'settings' : 'overview');
   const [facultyList, setFacultyList] = useState<any[]>([]);
   const [facultySalaries, setFacultySalaries] = useState<any[]>([]);
   const [payouts, setPayouts] = useState<any[]>([]);
@@ -55,7 +55,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
   const [isRequestingPayout, setIsRequestingPayout] = useState(false);
   const [resignations, setResignations] = useState<any[]>([]);
   const [isAddingPayout, setIsAddingPayout] = useState(false);
-  const [payoutForm, setPayoutForm] = useState({ userId: '', amount: '', transactionId: '', note: '' });
+  const [payoutForm, setPayoutForm] = useState({ userId: '', amount: '', transactionId: '', note: '', method: 'upi', periodMonth: new Date().toISOString().slice(0, 7) });
   
   // Faculty Custom Payment Edit & Wrapped
   const [isEditingPayment, setIsEditingPayment] = useState(false);
@@ -88,6 +88,9 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
 
   const [financeLedgers, setFinanceLedgers] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
+  const [monthlyFeeLedger, setMonthlyFeeLedger] = useState<any[]>([]);
+  const [studentStatusMonth, setStudentStatusMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [adminSelectedFacultyId, setAdminSelectedFacultyId] = useState('');
 
   useEffect(() => {
     let unsubSalaries = () => {};
@@ -97,6 +100,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     let unsubResignations = () => {};
     let unsubLedger = () => {};
     let unsubRequests = () => {};
+    let unsubMonthlyLedger = () => {};
 
     if (isAdmin) {
       unsubSalaries = firestoreService.listenToCollection('faculty_salaries', (data) => {
@@ -121,6 +125,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       unsubRequests = firestoreService.listenToCollection('payout_requests', (data) => {
         setRequests(data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
       });
+      unsubMonthlyLedger = firestoreService.listenToCollection('student_monthly_fee_ledger', setMonthlyFeeLedger);
 
       const fetchFaculty = async () => {
          try {
@@ -140,7 +145,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       fetchFaculty();
     } else if (isFaculty) {
       unsubSalaries = onSnapshot(query(collection(db, 'faculty_salaries'), where('userId', '==', user.uid)), (snap) => {
-        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const data: any[] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setFacultySalaries(data);
         setMySalaryInfo(data.find(s => s.userId === user.uid));
       }, (err) => console.warn(err));
@@ -163,6 +168,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
         const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setRequests(data.sort((a: any, b: any) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
       }, (err) => console.warn(err));
+      unsubMonthlyLedger = firestoreService.listenToCollection('student_monthly_fee_ledger', setMonthlyFeeLedger);
       // Ledger might need manual fetching if they own subjects, but right now they fetch none.
       // Admin will be needed to calculate balances properly, unless ledger read is opened up.
       // Setting ledger to empty for faculty.
@@ -179,6 +185,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       unsubResignations();
       unsubLedger();
       unsubRequests();
+      unsubMonthlyLedger();
     };
   }, [user.uid, isAdmin, isFaculty]);
 
@@ -216,7 +223,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
   }, [financeLedgers, payouts, user.uid, facultyBatches, isFaculty]);
 
   const handlePayoutRequest = async () => {
-    if (myBalance <= 0) {
+    if (displayBalance <= 0) {
       toast.error('Insufficient balance for disbursement');
       return;
     }
@@ -224,7 +231,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       await addDoc(collection(db, 'payout_requests'), {
         userId: user.uid,
         userName: user.displayName || user.email,
-        amount: myBalance,
+        amount: displayBalance,
         status: 'pending',
         createdAt: serverTimestamp(),
         type: 'early_disbursement'
@@ -236,40 +243,92 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     }
   };
 
-  const calculateNetReceivable = (salaryInfo: any, currentAttendance: any[]) => {
-    if (!salaryInfo) return 0;
-    
-    // Filter approved attendance for this month
-    const monthApproved = currentAttendance.filter(a => 
-      a.userId === salaryInfo.userId && 
-      a.dateStr.startsWith(selectedMonth) && 
-      a.isApproved
-    );
-
-    const workingDays = monthApproved.length;
-    
-    if (salaryInfo.model === 'monthly') {
-      const parts = selectedMonth.split('-');
-      const year = parseInt(parts[0]);
-      const month = parseInt(parts[1]);
-      const fixedSalary = parseFloat(salaryInfo.baseAmount || 0);
-      const totalDaysInMonth = new Date(year, month, 0).getDate();
-      const dailyRate = fixedSalary / totalDaysInMonth;
-      return workingDays * dailyRate;
-    } else if (salaryInfo.model === 'daily') {
-      return workingDays * parseFloat(salaryInfo.baseAmount || 0);
-    } else if (salaryInfo.model === 'per_student') {
-      // Need to count paid students in assigned batches
-      const facultyAssignedBatches = facultyBatches.filter(fb => fb.userId === salaryInfo.userId);
-      const paidStudentsCount = enrollments.filter(e => 
-        e.feeStatus === 'Paid' && 
-        facultyAssignedBatches.some(fb => fb.batchName === e.batchName && fb.subject === e.subject)
-      ).length;
-      return (workingDays > 0 ? 1 : 0) * (paidStudentsCount * parseFloat(salaryInfo.perStudentRate || 0));
-    }
-    
-    return 0;
+  const getFacultyScopedStudents = (facultyId: string, month: string) => {
+    const monthEnd = new Date(`${month}-01`);
+    monthEnd.setMonth(monthEnd.getMonth() + 1);
+    monthEnd.setDate(0);
+    const batches = facultyBatches.filter(fb => fb.userId === facultyId);
+    return enrollments.filter((e) => {
+      const inAssigned = batches.some((fb) =>
+        (fb.batchId && fb.batchId === e.batchId) ||
+        (fb.batchName && fb.batchName === e.batchName) ||
+        (fb.subject === 'ALL' || (e.subjects || []).includes(fb.subject))
+      );
+      if (!inAssigned) return false;
+      const createdAtDate = e.createdAt?.seconds ? new Date(e.createdAt.seconds * 1000) : null;
+      if (!createdAtDate) return true;
+      return createdAtDate.getTime() <= monthEnd.getTime();
+    });
   };
+
+  const getMonthlySalaryBreakdown = (salaryInfo: any, month: string) => {
+    if (!salaryInfo?.userId) {
+      return { presentDays: 0, classDays: 0, totalAssignedStudents: 0, paidStudentsCount: 0, unpaidStudentsCount: 0, earnedAmount: 0, pendingPotentialAmount: 0 };
+    }
+
+    const presentDays = attendance.filter((a) => a.userId === salaryInfo.userId && a.isApproved && (a.dateStr || '').startsWith(month)).length;
+    const classDays = Number(salaryInfo.totalClassDays || attendance.filter((a) => a.userId === salaryInfo.userId && (a.dateStr || '').startsWith(month)).length || 0);
+    const assignedStudents = getFacultyScopedStudents(salaryInfo.userId, month);
+    const assignedIds = new Set(assignedStudents.map((s: any) => s.id));
+    const monthLedger = monthlyFeeLedger.filter((l: any) => l.month === month && assignedIds.has(l.studentId));
+    const paidStudentsCount = monthLedger.filter((l: any) => Number(l.paidAmount || 0) > 0 || l.status === 'Paid').length;
+    const totalAssignedStudents = assignedStudents.length;
+    const unpaidStudentsCount = Math.max(0, totalAssignedStudents - paidStudentsCount);
+
+    const model = salaryInfo.model || 'monthly';
+    const rate = Number(salaryInfo.perStudentRate || salaryInfo.baseAmount || 0);
+    let earnedAmount = 0;
+    let pendingPotentialAmount = 0;
+
+    if (model === 'monthly') {
+      const totalFixedSalary = Number(salaryInfo.baseAmount || 0);
+      earnedAmount = classDays > 0 ? (totalFixedSalary / classDays) * presentDays : 0;
+    } else if (model === 'daily') {
+      earnedAmount = Number(salaryInfo.baseAmount || 0) * presentDays;
+    } else {
+      const formulaMode = salaryInfo.perStudentFormulaMode || 'attendance_adjusted';
+      const rateType = salaryInfo.perStudentRateType || 'fixed';
+      if (formulaMode === 'paid_student') {
+        if (rateType === 'percentage') {
+          earnedAmount = monthLedger.reduce((sum: number, l: any) => sum + ((Number(l.paidAmount || 0) * rate) / 100), 0);
+        } else {
+          earnedAmount = rate * paidStudentsCount;
+        }
+      } else {
+        earnedAmount = classDays > 0 ? ((rate * totalAssignedStudents) / classDays) * presentDays : 0;
+      }
+      pendingPotentialAmount = rateType === 'percentage'
+        ? 0
+        : Math.max(0, (rate * unpaidStudentsCount));
+    }
+
+    return { presentDays, classDays, totalAssignedStudents, paidStudentsCount, unpaidStudentsCount, earnedAmount, pendingPotentialAmount };
+  };
+
+  const calculateNetReceivable = (salaryInfo: any, month: string) => {
+    const breakdown = getMonthlySalaryBreakdown(salaryInfo, month);
+    const monthPayouts = payouts
+      .filter((p) => p.userId === salaryInfo?.userId && (p.periodMonth || month) === month)
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const monthAdjustments = requests
+      .filter((r) => r.userId === salaryInfo?.userId && r.type === 'salary_adjustment' && r.periodMonth === month)
+      .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    return Math.max(0, breakdown.earnedAmount + monthAdjustments - monthPayouts);
+  };
+
+  const paidOutTotal = useMemo(
+    () => payouts.filter(p => p.userId === user.uid).reduce((sum, p) => sum + (Number(p.amount) || 0), 0),
+    [payouts, user.uid]
+  );
+  const isPerStudentModel = mySalaryInfo?.model === 'per_student';
+  const estimatedModelReceivable = useMemo(
+    () => calculateNetReceivable(mySalaryInfo, selectedMonth),
+    [mySalaryInfo, attendance, selectedMonth, payouts, monthlyFeeLedger, enrollments, facultyBatches, requests]
+  );
+  const displayBalance = useMemo(() => {
+    if (isPerStudentModel) return myBalance;
+    return Math.max(0, estimatedModelReceivable - paidOutTotal);
+  }, [isPerStudentModel, myBalance, estimatedModelReceivable, paidOutTotal]);
 
   const saveSalarySettings = async (facId: string, data: any) => {
     try {
@@ -289,6 +348,10 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     try {
       await addDoc(collection(db, 'payouts'), {
         ...data,
+        method: data.method || 'upi',
+        periodMonth: data.periodMonth || selectedMonth,
+        approvedBy: data.approvedBy || user.email || 'system',
+        approvedAt: serverTimestamp(),
         date: serverTimestamp(),
         createdAt: serverTimestamp()
       });
@@ -314,10 +377,8 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     setResignationFileProgress(0);
     const toastId = toast.loading('Uploading resignation letter...');
     try {
-      const { promise } = storageService.uploadFile(resignationFile, (url, name, progress) => {
-          if (progress !== undefined) {
-             setResignationFileProgress(progress);
-          }
+      const { promise } = storageService.uploadFile(resignationFile, (progress) => {
+          setResignationFileProgress(progress);
       });
       const uploadedFile = await promise;
 
@@ -397,7 +458,15 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
               onClick={() => setActiveTab('student-payments')}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'student-payments' ? 'bg-[var(--primary)] text-white' : 'text-gray-500 hover:text-white'}`}
             >
-              Student Status
+              Student Fee Status
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('admin-earnings')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'admin-earnings' ? 'bg-[var(--primary)] text-white' : 'text-gray-500 hover:text-white'}`}
+            >
+              Earnings Monitor
             </button>
           )}
         </div>
@@ -413,31 +482,56 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                 <div className="absolute top-0 right-0 p-4 opacity-10">
                   <User size={80} />
                 </div>
-                <h3 className="font-bold text-lg mb-1 tracking-tight z-10">Student Fee Summary</h3>
-                <p className="text-xs opacity-70 z-10 mb-4">Tracking for your assigned batches</p>
-                <div className="flex gap-8 z-10">
-                  <div>
-                    <div className="text-4xl font-black text-green-500">
-                      {enrollments.filter(e => e.feeStatus === 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
+                {isPerStudentModel ? (
+                  <>
+                    <h3 className="font-bold text-lg mb-1 tracking-tight z-10">Student Fee Summary</h3>
+                    <p className="text-xs opacity-70 z-10 mb-4">Tracking for your assigned batches</p>
+                    <div className="flex gap-8 z-10">
+                      <div>
+                        <div className="text-4xl font-black text-green-500">
+                          {enrollments.filter(e => e.feeStatus === 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Earned (Paid)</div>
+                      </div>
+                      <div>
+                        <div className="text-4xl font-black text-amber-500">
+                          {enrollments.filter(e => e.feeStatus !== 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Pending Unpaid</div>
+                      </div>
                     </div>
-                    <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Total Paid</div>
-                  </div>
-                  <div>
-                    <div className="text-4xl font-black text-amber-500">
-                      {enrollments.filter(e => e.feeStatus !== 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
+                  </>
+                ) : (
+                  <>
+                    <h3 className="font-bold text-lg mb-1 tracking-tight z-10">Attendance Salary Summary</h3>
+                    <p className="text-xs opacity-70 z-10 mb-4">Monthly/Per-day payout is attendance linked</p>
+                    <div className="flex gap-8 z-10">
+                      <div>
+                        <div className="text-4xl font-black text-green-500">
+                          {attendance.filter(a => a.userId === user.uid && a.isApproved && a.dateStr.startsWith(selectedMonth)).length}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Present Days</div>
+                      </div>
+                      <div>
+                        <div className="text-4xl font-black text-blue-500">
+                          ₹{Math.round(estimatedModelReceivable).toLocaleString()}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Net Earned</div>
+                      </div>
                     </div>
-                    <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Pending</div>
-                  </div>
-                </div>
+                  </>
+                )}
               </div>
 
               <div className="glass-card p-6 bg-indigo-500/10 border-indigo-500/20">
-                <div className="text-[10px] uppercase font-black opacity-40 mb-1">Available Balance (50-50 Split)</div>
+                <div className="text-[10px] uppercase font-black opacity-40 mb-1">Available to Withdraw</div>
                 <div className="text-5xl font-black text-indigo-500 flex items-baseline gap-1 mt-2">
-                  ₹{Math.round(myBalance).toLocaleString()}
+                  ₹{Math.round(displayBalance).toLocaleString()}
                 </div>
                 <div className="mt-4 flex flex-col gap-1">
-                  <span className="text-[10px] opacity-60">Total earnings from paid enrollments</span>
+                  <span className="text-[10px] opacity-60">
+                    {isPerStudentModel ? 'Total earnings from paid enrollments' : 'Attendance-linked net earnings after disbursement'}
+                  </span>
                   <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden mt-1">
                     <motion.div 
                       initial={{ width: 0 }} 
@@ -452,7 +546,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="glass-card p-6 bg-emerald-500/10 border-emerald-500/20">
                 <div className="text-[10px] uppercase font-black opacity-40 mb-1">Monthly Estimations</div>
-                <div className="text-3xl font-black text-emerald-500 mt-2">₹{Math.round(calculateNetReceivable(mySalaryInfo, attendance)).toLocaleString()}</div>
+                <div className="text-3xl font-black text-emerald-500 mt-2">₹{Math.round(calculateNetReceivable(mySalaryInfo, selectedMonth)).toLocaleString()}</div>
                 <div className="mt-4 flex items-center justify-between border-t border-emerald-500/20 pt-4">
                   <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="text-[10px] p-1.5 bg-white/10 rounded outline-none border border-white/10 w-28" />
                   <span className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded">{attendance.filter(a => a.userId === user.uid && a.isApproved && a.dateStr.startsWith(selectedMonth)).length} Present Days</span>
@@ -475,10 +569,10 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                    </div>
                 </div>
                 <button 
-                  disabled={myBalance <= 0}
+                  disabled={displayBalance <= 0}
                   onClick={() => setIsRequestingPayout(true)}
                   className={`mt-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                    myBalance > 0 
+                    displayBalance > 0 
                     ? 'bg-indigo-500 text-white hover:scale-105 shadow-xl hover:shadow-indigo-500/20' 
                     : 'bg-white/5 text-gray-500 cursor-not-allowed'
                   }`}
@@ -519,7 +613,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                     <h3 className="text-xl font-black italic">REQUEST DISBURSEMENT</h3>
                     <div className="p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20">
                       <div className="text-[10px] font-black uppercase opacity-40 mb-1">Disbursable Amount</div>
-                      <div className="text-3xl font-black text-indigo-500">₹{Math.round(myBalance).toLocaleString()}</div>
+                      <div className="text-3xl font-black text-indigo-500">₹{Math.round(displayBalance).toLocaleString()}</div>
                       <p className="text-[10px] opacity-60 mt-2">This request will be processed within 24-48 hours after admin review.</p>
                     </div>
                     <div className="space-y-4">
@@ -529,7 +623,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                       </div>
                       <div className="flex items-center justify-between text-base font-black border-t border-white/10 pt-4">
                         <span>Net Payout:</span>
-                        <span className="text-indigo-400">₹{Math.round(myBalance).toLocaleString()}</span>
+                        <span className="text-indigo-400">₹{Math.round(displayBalance).toLocaleString()}</span>
                       </div>
                     </div>
                     <button 
@@ -593,7 +687,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                          <div className="space-y-1">
                             <label className="text-[8px] font-black uppercase opacity-40 pl-1">Salary Model</label>
                             <select 
@@ -624,16 +718,50 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                               className="w-full p-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold"
                             />
                          </div>
+                         <div className="space-y-1">
+                            <label className="text-[8px] font-black uppercase opacity-40 pl-1">Class Days / Month</label>
+                            <input
+                              type="number"
+                              value={salary?.totalClassDays || ''}
+                              onChange={(e) => saveSalarySettings(faculty.id, { totalClassDays: e.target.value })}
+                              className="w-full p-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold"
+                            />
+                         </div>
+                         <div className="space-y-1">
+                            <label className="text-[8px] font-black uppercase opacity-40 pl-1">Per Student Formula</label>
+                            <select
+                              value={salary?.perStudentFormulaMode || 'attendance_adjusted'}
+                              onChange={(e) => saveSalarySettings(faculty.id, { perStudentFormulaMode: e.target.value })}
+                              className="w-full p-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold"
+                            >
+                              <option value="attendance_adjusted">Attendance Adjusted</option>
+                              <option value="paid_student">Paid Student Direct</option>
+                            </select>
+                         </div>
+                         <div className="space-y-1">
+                            <label className="text-[8px] font-black uppercase opacity-40 pl-1">Rate Type</label>
+                            <select
+                              value={salary?.perStudentRateType || 'fixed'}
+                              onChange={(e) => saveSalarySettings(faculty.id, { perStudentRateType: e.target.value })}
+                              className="w-full p-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold"
+                            >
+                              <option value="fixed">Fixed ₹</option>
+                              <option value="percentage">Percentage %</option>
+                            </select>
+                         </div>
                          <div className="flex items-end">
                             <button 
                               onClick={() => {
-                                const amount = calculateNetReceivable(salary, attendance);
+                                const amount = calculateNetReceivable(salary, selectedMonth);
                                 const confirm = window.confirm(`Generate payout of ₹${Math.round(amount)} for ${faculty.name}?`);
                                 if (confirm) {
                                   recordPayout({
                                     userId: faculty.id,
                                     userName: faculty.name,
                                     amount: Math.round(amount),
+                                    periodMonth: selectedMonth,
+                                    method: 'manual',
+                                    approvedBy: user.email,
                                     note: `Auto-generated monthly payout`,
                                     transactionId: `TXN-${Date.now()}`
                                   });
@@ -702,40 +830,51 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
             <div className="flex justify-between items-center mb-4">
                <div>
                   <h3 className="font-bold">Student Fee Status</h3>
-                  <p className="text-xs opacity-60">Status of students in your assigned batches</p>
+                  <p className="text-xs opacity-60">Monthly reporting section to monitor paid / unpaid students in your assigned batches.</p>
                </div>
-               <button 
-                 onClick={() => {
-                   const qs = new URLSearchParams(window.location.search);
-                   const showUnpaid = qs.get('unpaid') === 'true';
-                   if (showUnpaid) qs.delete('unpaid');
-                   else qs.set('unpaid', 'true');
-                   window.history.replaceState(null, '', `?${qs.toString()}`);
-                   setActiveTab((prev) => {
-                     setActiveTab('overview');
-                     setTimeout(() => setActiveTab('student-payments'), 0);
-                     return prev;
-                   });
-                 }}
-                 className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${window.location.search.includes('unpaid=true') ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
-               >
-                 {window.location.search.includes('unpaid=true') ? 'Showing Unpaid Only' : 'Show Unpaid Only'}
-               </button>
+               <input
+                 type="month"
+                 value={studentStatusMonth}
+                 onChange={(e) => setStudentStatusMonth(e.target.value)}
+                 className="px-3 py-2 rounded-xl text-xs font-bold bg-white/5 border border-white/10"
+               />
             </div>
+            {(() => {
+              const scopedStudents = enrollments.filter((e) => facultyManagedBatches.some((fb) =>
+                (fb.batchId && fb.batchId === e.batchId) ||
+                (fb.batchName && fb.batchName === e.batchName) ||
+                (fb.subject === 'ALL' || (e.subjects || []).includes(fb.subject))
+              ));
+              const scopedIds = new Set(scopedStudents.map((s) => s.id));
+              const scopedLedger = monthlyFeeLedger.filter((l) => l.month === studentStatusMonth && scopedIds.has(l.studentId));
+              const paidCount = scopedLedger.filter((l) => Number(l.paidAmount || 0) > 0 || l.status === 'Paid').length;
+              const totalCount = scopedStudents.length;
+              const unpaidCount = Math.max(0, totalCount - paidCount);
+
+              return (
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="glass-card p-3"><div className="text-[10px] opacity-60">Assigned Students</div><div className="text-2xl font-black">{totalCount}</div></div>
+                  <div className="glass-card p-3"><div className="text-[10px] opacity-60">Paid ({studentStatusMonth})</div><div className="text-2xl font-black text-green-500">{paidCount}</div></div>
+                  <div className="glass-card p-3"><div className="text-[10px] opacity-60">Unpaid ({studentStatusMonth})</div><div className="text-2xl font-black text-amber-500">{unpaidCount}</div></div>
+                </div>
+              );
+            })()}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                {enrollments
-                 .filter(e => {
-                   const inBatch = facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]));
-                   // Fee tracking months begin from May (month 4 in JS)
-                   const isMayStart = e.createdAt?.seconds ? new Date(e.createdAt.seconds * 1000).getMonth() >= 4 : true;
-                   return inBatch && isMayStart;
-                 })
-                 .filter(e => window.location.search.includes('unpaid=true') ? e.feeStatus !== 'Paid' : true)
-                 .map(e => (
-                 <div key={e.id} className="glass-card p-4 flex items-center justify-between border-l-4 border-l-transparent" style={{ borderLeftColor: e.feeStatus === 'Paid' ? '#10b981' : '#ef4444' }}>
+                 .filter(e => facultyManagedBatches.some(fb =>
+                   (fb.batchId && fb.batchId === e.batchId) ||
+                   (fb.batchName && fb.batchName === e.batchName) ||
+                   (fb.subject === 'ALL' || (e.subjects || []).includes(fb.subject))
+                 ))
+                 .map(e => {
+                 const monthLedger = monthlyFeeLedger.find((l) => l.studentId === e.id && l.month === studentStatusMonth);
+                 const isPaid = Boolean((monthLedger && Number(monthLedger.paidAmount || 0) > 0) || monthLedger?.status === 'Paid');
+                 const paidAmount = Number(monthLedger?.paidAmount || 0);
+                 return (
+                 <div key={e.id} className="glass-card p-4 flex items-center justify-between border-l-4 border-l-transparent" style={{ borderLeftColor: isPaid ? '#10b981' : '#ef4444' }}>
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${e.feeStatus === 'Paid' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
-                        {e.feeStatus === 'Paid' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                      <div className={`p-2 rounded-lg ${isPaid ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                        {isPaid ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
                       </div>
                       <div>
                         <div className="text-sm font-bold">{e.name}</div>
@@ -743,11 +882,12 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                       </div>
                     </div>
                     <div className="text-right">
-                       <span className={`text-[10px] font-black uppercase ${e.feeStatus === 'Paid' ? 'text-green-500' : 'text-red-500'}`}>
-                         {e.feeStatus || 'Pending'}
+                       <span className={`text-[10px] font-black uppercase ${isPaid ? 'text-green-500' : 'text-red-500'}`}>
+                         {isPaid ? 'Paid' : 'Pending'}
                        </span>
-                       <div className="text-[8px] opacity-40">Current Month</div>
-                       {e.feeStatus !== 'Paid' && (
+                       <div className="text-[8px] opacity-40">{studentStatusMonth}</div>
+                       {isPaid && <div className="text-[10px] text-green-500 font-bold mt-1">₹{paidAmount}</div>}
+                       {!isPaid && (
                          <div className="text-[10px] text-indigo-500 font-bold mt-1 cursor-pointer hover:underline" onClick={() => {
                            const msg = `Hi ${e.name},\nThis is a gentle reminder regarding your pending tuition fees. Please clear them.`;
                            window.open(`https://wa.me/${e.whatsapp?.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`);
@@ -755,9 +895,50 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                        )}
                     </div>
                  </div>
-               ))}
+               )})}
                {enrollments.length === 0 && <div className="p-10 text-center opacity-40 italic">No assigned students found.</div>}
             </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'admin-earnings' && isAdmin && (
+          <motion.div key="admin-earnings" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+            <div className="glass-card p-4 flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+              <div>
+                <h3 className="font-bold">Admin Earnings Monitor</h3>
+                <p className="text-xs opacity-60">Select a faculty and review month-wise earning labels.</p>
+              </div>
+              <div className="flex gap-2">
+                <select
+                  value={adminSelectedFacultyId}
+                  onChange={(e) => setAdminSelectedFacultyId(e.target.value)}
+                  className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs"
+                >
+                  <option value="">Select Faculty</option>
+                  {facultyList.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name || f.email}</option>
+                  ))}
+                </select>
+                <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="p-2 bg-white/5 border border-white/10 rounded-xl text-xs" />
+              </div>
+            </div>
+            {adminSelectedFacultyId && (() => {
+              const salaryInfo = facultySalaries.find((s) => s.userId === adminSelectedFacultyId);
+              const breakdown = getMonthlySalaryBreakdown(salaryInfo, selectedMonth);
+              const alreadyDisbursed = payouts.filter((p) => p.userId === adminSelectedFacultyId && (p.periodMonth || selectedMonth) === selectedMonth)
+                .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+              const netEarned = breakdown.earnedAmount;
+              const available = Math.max(0, netEarned - alreadyDisbursed);
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                  <div className="glass-card p-4"><div className="text-[10px] opacity-60">Available to Withdraw</div><div className="text-2xl font-black text-indigo-500">₹{Math.round(available)}</div></div>
+                  <div className="glass-card p-4"><div className="text-[10px] opacity-60">Already Disbursed</div><div className="text-2xl font-black text-blue-400">₹{Math.round(alreadyDisbursed)}</div></div>
+                  <div className="glass-card p-4"><div className="text-[10px] opacity-60">Pending (Unpaid Students)</div><div className="text-2xl font-black text-amber-500">{breakdown.unpaidStudentsCount}</div></div>
+                  <div className="glass-card p-4"><div className="text-[10px] opacity-60">Adjustments</div><div className="text-2xl font-black text-purple-400">₹0</div></div>
+                  <div className="glass-card p-4"><div className="text-[10px] opacity-60">Net Earned Till Date</div><div className="text-2xl font-black text-green-500">₹{Math.round(netEarned)}</div></div>
+                </div>
+              );
+            })()}
           </motion.div>
         )}
       </AnimatePresence>
@@ -812,14 +993,27 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                           onClick={() => {
                             const tid = prompt('Enter Transaction ID for Payout:');
                             if (!tid) return;
+                            const amountInput = prompt('Enter amount to disburse (partial allowed):', String(req.amount || 0));
+                            const amount = Number(amountInput || 0);
+                            if (!amount || amount <= 0) return;
+                            const note = prompt('Optional note for disbursement log:', 'Processed from disbursement request') || '';
                             recordPayout({
                               userId: req.userId,
                               userName: req.userName,
-                              amount: req.amount,
+                              amount,
                               transactionId: tid,
-                              note: 'Processed from early disbursement request'
+                              note,
+                              periodMonth: selectedMonth,
+                              method: 'manual',
+                              approvedBy: user.email
                             });
-                            firestoreService.updateItem('payout_requests', req.id, { status: 'processed', transactionId: tid });
+                            firestoreService.updateItem('payout_requests', req.id, {
+                              status: amount === Number(req.amount || 0) ? 'processed' : 'partially_processed',
+                              transactionId: tid,
+                              processedAmount: amount,
+                              approvedBy: user.email,
+                              processedAt: serverTimestamp(),
+                            });
                           }} 
                           className="px-4 py-2 bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors"
                         >
@@ -882,6 +1076,27 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                   />
                 </div>
                 <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase opacity-40">Method</label>
+                  <select
+                    className="w-full p-3 bg-gray-100 dark:bg-white/5 border border-white/10 rounded-xl text-sm"
+                    value={payoutForm.method}
+                    onChange={e => setPayoutForm({...payoutForm, method: e.target.value})}
+                  >
+                    <option value="upi">UPI</option>
+                    <option value="bank">Bank Transfer</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase opacity-40">Period Month</label>
+                  <input
+                    type="month"
+                    className="w-full p-3 bg-gray-100 dark:bg-white/5 border border-white/10 rounded-xl text-sm outline-none focus:border-[var(--primary)]"
+                    value={payoutForm.periodMonth}
+                    onChange={e => setPayoutForm({...payoutForm, periodMonth: e.target.value})}
+                  />
+                </div>
+                <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase opacity-40">Note</label>
                   <input
                     type="text"
@@ -901,10 +1116,13 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                       userName: targetFaculty.name || targetFaculty.email,
                       amount: Number(payoutForm.amount),
                       transactionId: payoutForm.transactionId,
-                      note: payoutForm.note
+                      note: payoutForm.note,
+                      method: payoutForm.method,
+                      periodMonth: payoutForm.periodMonth,
+                      approvedBy: user.email
                     });
                     setIsAddingPayout(false);
-                    setPayoutForm({ userId: '', amount: '', transactionId: '', note: '' });
+                    setPayoutForm({ userId: '', amount: '', transactionId: '', note: '', method: 'upi', periodMonth: new Date().toISOString().slice(0, 7) });
                   } else {
                     toast.error('Select faculty and enter amount');
                   }
@@ -1097,7 +1315,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                   <div className="relative z-10 w-full space-y-4">
                     <div className="p-6 bg-gradient-to-br from-[var(--primary)] to-indigo-600 rounded-3xl text-white shadow-xl">
                        <span className="text-[8px] font-black uppercase tracking-widest opacity-70 block mb-1">Total Payout Pending</span>
-                       <div className="text-3xl font-black">₹{myBalance.toLocaleString()}</div>
+                      <div className="text-3xl font-black">₹{displayBalance.toLocaleString()}</div>
                        <div className="text-[8px] opacity-60 font-bold mt-1 uppercase tracking-tighter italic">— Secure Digital Split —</div>
                     </div>
                     <p className="text-[8px] text-white/30 text-center font-bold tracking-widest uppercase italic">Xavi x Sonai Internal Platform</p>

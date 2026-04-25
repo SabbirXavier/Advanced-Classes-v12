@@ -27,6 +27,7 @@ export default function TabAdmin({ branding }: { branding?: any }) {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeSection, setActiveSection] = useState('batches');
   const [user, setUser] = useState<any>(null);
+  const userData = user;
   
   const adminEmails = [
     (import.meta.env.VITE_ADMIN_EMAIL || 'xavierscot3454@gmail.com').toLowerCase(),

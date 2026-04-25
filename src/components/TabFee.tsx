@@ -6,6 +6,7 @@ import { updateDoc, doc, serverTimestamp, addDoc, collection, Timestamp } from '
 import { storageService } from '../services/storageService';
 import { authService } from '../services/authService';
 import { firestoreService } from '../services/firestoreService';
+import { pricingService } from '../services/pricingService';
 import EnrollmentSection from './EnrollmentSection';
 import MarkdownRenderer from './MarkdownRenderer';
 import toast, { Toaster } from 'react-hot-toast';
@@ -37,9 +38,18 @@ function TabFee({ branding }: TabFeeProps) {
   });
 
   useEffect(() => {
-    const unsubFees = firestoreService.listenToCollection('fees', (data) => {
-      setFees(data);
-    });
+    let mounted = true;
+    const loadPricing = async () => {
+      try {
+        const pricing = await pricingService.getSubjectPricing();
+        if (mounted) setFees(pricing as any[]);
+      } catch (error) {
+        console.error('Failed to load subject pricing, fallback to fees collection', error);
+        const fallback = await firestoreService.getCollection('fees');
+        if (mounted) setFees(fallback);
+      }
+    };
+    loadPricing();
 
     const unsubscribeAuth = authService.onAuthChange((firebaseUser) => {
       setUser(firebaseUser);
@@ -59,7 +69,6 @@ function TabFee({ branding }: TabFeeProps) {
           });
           return () => {
             unsubEnroll();
-            unsubFees();
           };
         }
       } else {
@@ -69,8 +78,8 @@ function TabFee({ branding }: TabFeeProps) {
     });
 
     return () => {
+      mounted = false;
       unsubscribeAuth();
-      unsubFees();
     };
   }, []);
 
@@ -113,6 +122,16 @@ function TabFee({ branding }: TabFeeProps) {
       await updateDoc(doc(db, 'enrollments', enrollment.id), {
         paymentHistory: updatedHistory,
         lastPaymentAttempt: serverTimestamp()
+      });
+
+      await pricingService.recordPaymentAndUpdateLedger({
+        studentId: user?.uid || enrollment.id,
+        studentName: enrollment.name,
+        month: new Date().toISOString().slice(0, 7),
+        amount: parseFloat(paymentData.amount || netPayable.toString()),
+        paymentId: newPayment.id,
+        transactionId: paymentData.transactionId,
+        mode: 'upi',
       });
       
       // Also add to global finances for admin review
@@ -183,11 +202,12 @@ function TabFee({ branding }: TabFeeProps) {
   const handleAddFee = async () => {
     if (!newFee.subject) return;
     try {
-      const finalPrice = newFee.originalPrice - newFee.discount;
-      await firestoreService.addItem('fees', {
+      await pricingService.createSubjectPricing({
         ...newFee,
-        finalPrice
+        finalPrice: newFee.originalPrice - newFee.discount,
       });
+      const refreshed = await pricingService.getSubjectPricing();
+      setFees(refreshed as any[]);
       setShowAddForm(false);
       setNewFee({ subject: '', originalPrice: 0, discount: 0, grade: 'XII', grades: ['XII'] });
       toast.success('Fee added successfully!');
@@ -199,11 +219,12 @@ function TabFee({ branding }: TabFeeProps) {
   const handleUpdateFee = async () => {
     if (!editingFee || !editingFee.subject) return;
     try {
-      const finalPrice = editingFee.originalPrice - editingFee.discount;
-      await firestoreService.updateItem('fees', editingFee.id, {
+      await pricingService.updateSubjectPricing(editingFee.id, {
         ...editingFee,
-        finalPrice
+        finalPrice: editingFee.originalPrice - editingFee.discount,
       });
+      const refreshed = await pricingService.getSubjectPricing();
+      setFees(refreshed as any[]);
       setEditingFee(null);
       toast.success('Fee updated successfully!');
     } catch (err) {
@@ -214,7 +235,8 @@ function TabFee({ branding }: TabFeeProps) {
   const handleDeleteFee = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this fee?')) return;
     try {
-      await firestoreService.deleteItem('fees', id);
+      await pricingService.softDeleteSubjectPricing(id);
+      setFees(prev => prev.filter((f: any) => f.id !== id));
       toast.success('Fee deleted successfully!');
     } catch (err) {
       toast.error('Failed to delete fee');
