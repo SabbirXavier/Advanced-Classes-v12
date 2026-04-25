@@ -4,6 +4,7 @@ import confetti from 'canvas-confetti';
 import toast, { Toaster } from 'react-hot-toast';
 import { firestoreService } from '../services/firestoreService';
 import { authService } from '../services/authService';
+import { pricingService } from '../services/pricingService';
 
 export default function EnrollmentModal() {
   const [isOpen, setIsOpen] = useState(false);
@@ -19,6 +20,7 @@ export default function EnrollmentModal() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [phoneError, setPhoneError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [pricingPreview, setPricingPreview] = useState({ totalBaseAmount: 0, discountedAmount: 0 });
 
   const [formData, setFormData] = useState({
     name: '',
@@ -62,32 +64,46 @@ export default function EnrollmentModal() {
     }));
   };
 
-  const calculatePricing = (subjects: string[], grade: string, feesData: any[]) => {
-    const selectedFees = feesData.filter(f => subjects.includes(f.subject));
-    let totalBaseAmount = selectedFees.reduce((sum, f) => sum + (Number(f.originalPrice) || 0), 0);
-    let discountedAmount = selectedFees.reduce((sum, f) => sum + (Number(f.finalPrice) || 0), 0);
+  useEffect(() => {
+    let active = true;
 
-    // Class X Special Science Group Logic
-    if (grade === 'X') {
-      const scienceSubjects = ['Maths', 'Physics', 'Chemistry', 'Biology'];
-      const selectedScience = subjects.filter(s => scienceSubjects.includes(s));
-      
-      if (selectedScience.length === 4) {
-        const standardScienceTotal = selectedFees
-          .filter(f => scienceSubjects.includes(f.subject))
-          .reduce((sum, f) => sum + (Number(f.finalPrice) || 0), 0);
-        
-        discountedAmount = (discountedAmount - standardScienceTotal) + 1499;
-      } else if (selectedScience.length > 0) {
-        const standardScienceTotal = selectedFees
-          .filter(f => scienceSubjects.includes(f.subject))
-          .reduce((sum, f) => sum + (Number(f.finalPrice) || 0), 0);
-        
-        discountedAmount = (discountedAmount - standardScienceTotal) + (selectedScience.length * 399);
+    const refreshPricingPreview = async () => {
+      if (formData.subjects.length === 0 || fees.length === 0) {
+        if (active) {
+          setPricingPreview({ totalBaseAmount: 0, discountedAmount: 0 });
+        }
+        return;
       }
-    }
-    return { totalBaseAmount, discountedAmount, discount: totalBaseAmount - discountedAmount };
-  };
+
+      try {
+        const quote = await pricingService.calculateQuote({
+          subjects: formData.subjects,
+          grade: formData.grade,
+          feeItems: fees
+        });
+        if (active) {
+          setPricingPreview({
+            totalBaseAmount: quote.totalBaseAmount,
+            discountedAmount: quote.discountedAmount
+          });
+        }
+      } catch (error) {
+        console.error('Failed to calculate pricing preview', error);
+        const selectedFees = fees.filter(f => formData.subjects.includes(f.subject));
+        const totalBaseAmount = selectedFees.reduce((sum, f) => sum + (Number(f.originalPrice) || 0), 0);
+        const discountedAmount = selectedFees.reduce((sum, f) => sum + (Number(f.finalPrice) || 0), 0);
+        if (active) {
+          setPricingPreview({ totalBaseAmount, discountedAmount });
+        }
+      }
+    };
+
+    refreshPricingPreview();
+
+    return () => {
+      active = false;
+    };
+  }, [fees, formData.grade, formData.subjects]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,8 +127,11 @@ export default function EnrollmentModal() {
     }
 
     try {
-      // Use helper for calculation
-      const { totalBaseAmount, discountedAmount, discount } = calculatePricing(formData.subjects, formData.grade, fees);
+      const { totalBaseAmount, discountedAmount, discount } = await pricingService.calculateQuote({
+        subjects: formData.subjects,
+        grade: formData.grade,
+        feeItems: fees
+      });
 
       const enrollmentData = {
         name: formData.name,
@@ -510,7 +529,7 @@ export default function EnrollmentModal() {
           </div>
 
           {formData.subjects.length > 0 && (() => {
-            const { totalBaseAmount, discountedAmount } = calculatePricing(formData.subjects, formData.grade, fees);
+            const { totalBaseAmount, discountedAmount } = pricingPreview;
 
             return (
               <div className="flex items-end justify-between pt-4 pb-2 border-t border-gray-200 dark:border-white/10 mt-2">

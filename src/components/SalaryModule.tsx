@@ -140,7 +140,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       fetchFaculty();
     } else if (isFaculty) {
       unsubSalaries = onSnapshot(query(collection(db, 'faculty_salaries'), where('userId', '==', user.uid)), (snap) => {
-        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const data: any[] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setFacultySalaries(data);
         setMySalaryInfo(data.find(s => s.userId === user.uid));
       }, (err) => console.warn(err));
@@ -216,7 +216,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
   }, [financeLedgers, payouts, user.uid, facultyBatches, isFaculty]);
 
   const handlePayoutRequest = async () => {
-    if (myBalance <= 0) {
+    if (displayBalance <= 0) {
       toast.error('Insufficient balance for disbursement');
       return;
     }
@@ -224,7 +224,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
       await addDoc(collection(db, 'payout_requests'), {
         userId: user.uid,
         userName: user.displayName || user.email,
-        amount: myBalance,
+        amount: displayBalance,
         status: 'pending',
         createdAt: serverTimestamp(),
         type: 'early_disbursement'
@@ -271,6 +271,20 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     return 0;
   };
 
+  const paidOutTotal = useMemo(
+    () => payouts.filter(p => p.userId === user.uid).reduce((sum, p) => sum + (Number(p.amount) || 0), 0),
+    [payouts, user.uid]
+  );
+  const isPerStudentModel = mySalaryInfo?.model === 'per_student';
+  const estimatedModelReceivable = useMemo(
+    () => calculateNetReceivable(mySalaryInfo, attendance),
+    [mySalaryInfo, attendance, selectedMonth]
+  );
+  const displayBalance = useMemo(() => {
+    if (isPerStudentModel) return myBalance;
+    return Math.max(0, estimatedModelReceivable - paidOutTotal);
+  }, [isPerStudentModel, myBalance, estimatedModelReceivable, paidOutTotal]);
+
   const saveSalarySettings = async (facId: string, data: any) => {
     try {
       const docId = `salary_${facId}`;
@@ -314,10 +328,8 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
     setResignationFileProgress(0);
     const toastId = toast.loading('Uploading resignation letter...');
     try {
-      const { promise } = storageService.uploadFile(resignationFile, (url, name, progress) => {
-          if (progress !== undefined) {
-             setResignationFileProgress(progress);
-          }
+      const { promise } = storageService.uploadFile(resignationFile, (progress) => {
+          setResignationFileProgress(progress);
       });
       const uploadedFile = await promise;
 
@@ -413,31 +425,56 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                 <div className="absolute top-0 right-0 p-4 opacity-10">
                   <User size={80} />
                 </div>
-                <h3 className="font-bold text-lg mb-1 tracking-tight z-10">Student Fee Summary</h3>
-                <p className="text-xs opacity-70 z-10 mb-4">Tracking for your assigned batches</p>
-                <div className="flex gap-8 z-10">
-                  <div>
-                    <div className="text-4xl font-black text-green-500">
-                      {enrollments.filter(e => e.feeStatus === 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
+                {isPerStudentModel ? (
+                  <>
+                    <h3 className="font-bold text-lg mb-1 tracking-tight z-10">Student Fee Summary</h3>
+                    <p className="text-xs opacity-70 z-10 mb-4">Tracking for your assigned batches</p>
+                    <div className="flex gap-8 z-10">
+                      <div>
+                        <div className="text-4xl font-black text-green-500">
+                          {enrollments.filter(e => e.feeStatus === 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Earned (Paid)</div>
+                      </div>
+                      <div>
+                        <div className="text-4xl font-black text-amber-500">
+                          {enrollments.filter(e => e.feeStatus !== 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Pending Unpaid</div>
+                      </div>
                     </div>
-                    <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Total Paid</div>
-                  </div>
-                  <div>
-                    <div className="text-4xl font-black text-amber-500">
-                      {enrollments.filter(e => e.feeStatus !== 'Paid' && facultyManagedBatches.some(fb => fb.batchName === e.batchName && (fb.subject === 'ALL' || fb.subject === e.subjects?.[0]))).length}
+                  </>
+                ) : (
+                  <>
+                    <h3 className="font-bold text-lg mb-1 tracking-tight z-10">Attendance Salary Summary</h3>
+                    <p className="text-xs opacity-70 z-10 mb-4">Monthly/Per-day payout is attendance linked</p>
+                    <div className="flex gap-8 z-10">
+                      <div>
+                        <div className="text-4xl font-black text-green-500">
+                          {attendance.filter(a => a.userId === user.uid && a.isApproved && a.dateStr.startsWith(selectedMonth)).length}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Present Days</div>
+                      </div>
+                      <div>
+                        <div className="text-4xl font-black text-blue-500">
+                          ₹{Math.round(estimatedModelReceivable).toLocaleString()}
+                        </div>
+                        <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Net Earned</div>
+                      </div>
                     </div>
-                    <div className="text-[10px] uppercase font-bold opacity-60 tracking-widest mt-1">Pending</div>
-                  </div>
-                </div>
+                  </>
+                )}
               </div>
 
               <div className="glass-card p-6 bg-indigo-500/10 border-indigo-500/20">
-                <div className="text-[10px] uppercase font-black opacity-40 mb-1">Available Balance (50-50 Split)</div>
+                <div className="text-[10px] uppercase font-black opacity-40 mb-1">Available to Withdraw</div>
                 <div className="text-5xl font-black text-indigo-500 flex items-baseline gap-1 mt-2">
-                  ₹{Math.round(myBalance).toLocaleString()}
+                  ₹{Math.round(displayBalance).toLocaleString()}
                 </div>
                 <div className="mt-4 flex flex-col gap-1">
-                  <span className="text-[10px] opacity-60">Total earnings from paid enrollments</span>
+                  <span className="text-[10px] opacity-60">
+                    {isPerStudentModel ? 'Total earnings from paid enrollments' : 'Attendance-linked net earnings after disbursement'}
+                  </span>
                   <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden mt-1">
                     <motion.div 
                       initial={{ width: 0 }} 
@@ -475,10 +512,10 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                    </div>
                 </div>
                 <button 
-                  disabled={myBalance <= 0}
+                  disabled={displayBalance <= 0}
                   onClick={() => setIsRequestingPayout(true)}
                   className={`mt-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                    myBalance > 0 
+                    displayBalance > 0 
                     ? 'bg-indigo-500 text-white hover:scale-105 shadow-xl hover:shadow-indigo-500/20' 
                     : 'bg-white/5 text-gray-500 cursor-not-allowed'
                   }`}
@@ -519,7 +556,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                     <h3 className="text-xl font-black italic">REQUEST DISBURSEMENT</h3>
                     <div className="p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20">
                       <div className="text-[10px] font-black uppercase opacity-40 mb-1">Disbursable Amount</div>
-                      <div className="text-3xl font-black text-indigo-500">₹{Math.round(myBalance).toLocaleString()}</div>
+                      <div className="text-3xl font-black text-indigo-500">₹{Math.round(displayBalance).toLocaleString()}</div>
                       <p className="text-[10px] opacity-60 mt-2">This request will be processed within 24-48 hours after admin review.</p>
                     </div>
                     <div className="space-y-4">
@@ -529,7 +566,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                       </div>
                       <div className="flex items-center justify-between text-base font-black border-t border-white/10 pt-4">
                         <span>Net Payout:</span>
-                        <span className="text-indigo-400">₹{Math.round(myBalance).toLocaleString()}</span>
+                        <span className="text-indigo-400">₹{Math.round(displayBalance).toLocaleString()}</span>
                       </div>
                     </div>
                     <button 
@@ -1097,7 +1134,7 @@ export default function SalaryModule({ user, isAdmin, isFaculty, facultyBatches 
                   <div className="relative z-10 w-full space-y-4">
                     <div className="p-6 bg-gradient-to-br from-[var(--primary)] to-indigo-600 rounded-3xl text-white shadow-xl">
                        <span className="text-[8px] font-black uppercase tracking-widest opacity-70 block mb-1">Total Payout Pending</span>
-                       <div className="text-3xl font-black">₹{myBalance.toLocaleString()}</div>
+                      <div className="text-3xl font-black">₹{displayBalance.toLocaleString()}</div>
                        <div className="text-[8px] opacity-60 font-bold mt-1 uppercase tracking-tighter italic">— Secure Digital Split —</div>
                     </div>
                     <p className="text-[8px] text-white/30 text-center font-bold tracking-widest uppercase italic">Xavi x Sonai Internal Platform</p>
