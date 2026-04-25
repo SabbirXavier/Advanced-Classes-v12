@@ -8,6 +8,15 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { MongoClient, GridFSBucket, ObjectId } from 'mongodb';
 import multer from 'multer';
+import pricingRoutes from './modules/pricing/routes.js';
+import feeRoutes from './modules/fees/routes.js';
+import paymentRoutes from './modules/payments/routes.js';
+import attendanceRoutes from './modules/attendance/routes.js';
+import facultyRoutes from './modules/faculty/routes.js';
+import salaryRoutes from './modules/salary/routes.js';
+import reportRoutes from './modules/reports/routes.js';
+import notificationRoutes from './modules/notifications/routes.js';
+import auditRoutes from './modules/audit/routes.js';
 
 // Storage setup
 const MONGODB_FILE_URI = process.env.MONGODB_FILE_URI || process.env.MONGODB_URI;
@@ -58,6 +67,15 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: '10mb' }));
+  app.use('/api/v2/pricing', pricingRoutes);
+  app.use('/api/v2/fees', feeRoutes);
+  app.use('/api/v2/payments', paymentRoutes);
+  app.use('/api/v2/attendance', attendanceRoutes);
+  app.use('/api/v2/faculty', facultyRoutes);
+  app.use('/api/v2/salary', salaryRoutes);
+  app.use('/api/v2/reports', reportRoutes);
+  app.use('/api/v2/notifications', notificationRoutes);
+  app.use('/api/v2/audit', auditRoutes);
 
   // API Routes
   // Middleware to check admin token
