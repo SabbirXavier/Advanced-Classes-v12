@@ -43,6 +43,7 @@ export default function App() {
   const [isVerified, setIsVerified] = useState(false);
   const [userEnrollment, setUserEnrollment] = useState<any>(null);
   const [facultyBatches, setFacultyBatches] = useState<any[]>([]);
+  const [hasNewMyBatch, setHasNewMyBatch] = useState(false);
 
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [isLandingPage, setIsLandingPage] = useState(window.location.pathname === '/landing');
@@ -220,6 +221,42 @@ export default function App() {
     return () => unsub?.();
   }, [user]);
 
+  useEffect(() => {
+    if (!userEnrollment && !isSystemFaculty) {
+      setHasNewMyBatch(false);
+      return;
+    }
+    let unsub: any = null;
+    const initDropsWatcher = async () => {
+      const { collection, onSnapshot } = await import('firebase/firestore');
+      const key = `last_seen_drop_${user?.uid || 'guest'}`;
+      const lastSeen = Number(localStorage.getItem(key) || 0);
+      unsub = onSnapshot(collection(db, 'drops'), (snap) => {
+        const enrolledSubjects = new Set((userEnrollment?.subjects || []).map((s: string) => s.toLowerCase()));
+        const hasNew = snap.docs.some((d) => {
+          const data: any = d.data();
+          const createdMs = data.createdAt?.seconds ? data.createdAt.seconds * 1000 : 0;
+          const isAfterSeen = createdMs > lastSeen;
+          if (!isAfterSeen) return false;
+          if (isSystemFaculty) return true;
+          const dropSubjects = (data.subjects || []).map((s: string) => String(s).toLowerCase());
+          return dropSubjects.length === 0 || dropSubjects.some((s: string) => enrolledSubjects.has(s));
+        });
+        setHasNewMyBatch(hasNew);
+      });
+    };
+    initDropsWatcher();
+    return () => unsub?.();
+  }, [user?.uid, userEnrollment, isSystemFaculty]);
+
+  useEffect(() => {
+    if (activeTab === 'exclusive') {
+      const key = `last_seen_drop_${user?.uid || 'guest'}`;
+      localStorage.setItem(key, String(Date.now()));
+      setHasNewMyBatch(false);
+    }
+  }, [activeTab, user?.uid]);
+
   const toggleDarkMode = () => {
     if (isDarkMode) {
       document.documentElement.classList.remove('dark');
@@ -242,7 +279,7 @@ export default function App() {
     downloads: { icon: <Download size={22} />, label: "PDFs", isActive: (t) => t === 'downloads' },
     library: { icon: <Library size={22} />, label: "Library", isActive: (t) => t === 'library' },
     whiteboard: { icon: <Edit2 size={22} />, label: "Board", isActive: (t) => t === 'whiteboard' },
-    exclusive: { icon: <BookOpen size={22} />, label: "My Batch", isActive: (t) => t === 'exclusive' },
+    exclusive: { icon: <BookOpen size={22} />, label: hasNewMyBatch ? "My Batch • New" : "My Batch", isActive: (t) => t === 'exclusive' },
     studyhub: { icon: <MessageSquare size={22} />, label: "Chat Room", isActive: (t) => t === 'studyhub' },
     about: { icon: <Users size={22} />, label: "About", isActive: (t) => t === 'about' },
     admin: { icon: <Shield size={22} />, label: "Dashboard", isActive: (t) => t === 'admin' },
