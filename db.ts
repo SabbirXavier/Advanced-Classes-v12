@@ -44,7 +44,7 @@ const studentFeeLedgerV2Schema = new mongoose.Schema({
   snapshot_json: Object,
   revision_of: String,
   createdAt: { type: Date, default: Date.now }
-});
+}, { strict: false });
 const feePaymentsV2Schema = new mongoose.Schema({
   student_id: String,
   ledger_id: String,
@@ -52,7 +52,47 @@ const feePaymentsV2Schema = new mongoose.Schema({
   idempotency_key: { type: String, unique: true },
   createdAt: { type: Date, default: Date.now },
   source: String
-});
+}, { strict: false });
+const feePaymentRequestV2Schema = new mongoose.Schema({
+  student_id: String,
+  amount: Number,
+  transaction_id: String,
+  screenshot_url: String,
+  selected_month: String,
+  allocations: Array,
+  verification_status: String,
+  verified_by: String,
+  verified_at: String,
+  final_allocations: Array,
+  receipt_id: String,
+  unallocated_amount: Number,
+  payment_mode: String,
+  notes: String,
+  submitted_at: String,
+  source: String
+}, { strict: false });
+const feeReceiptV2Schema = new mongoose.Schema({
+  institute_name: String,
+  student_id: String,
+  student_name: String,
+  batch: String,
+  months_covered: Array,
+  amount_paid: Number,
+  balance_remaining: Number,
+  transaction_id: String,
+  payment_mode: String,
+  verification_status: String,
+  receipt_date: String,
+  disclaimer: String,
+  source_request_id: String
+}, { strict: false });
+const batchVerifiedStudentsV2Schema = new mongoose.Schema({
+  batch: String,
+  month: String,
+  student_ids: Array,
+  recalculatedAt: String,
+  source: String
+}, { strict: false });
 const attendanceRecordSchema = new mongoose.Schema({
   faculty_id: String,
   subject: String,
@@ -89,7 +129,7 @@ const auditLogSchema = new mongoose.Schema({
 });
 
 let Batch: any, Routine: any, Download: any, Fee: any, Enrollment: any, ChatUser: any, ChatMessage: any, ChatSettings: any;
-let PricingPlan: any, PricingRule: any, StudentFeeLedgerV2: any, FeePaymentV2: any, AttendanceRecord: any, FacultyContract: any, FacultyEarningV2: any, AuditLog: any;
+let PricingPlan: any, PricingRule: any, StudentFeeLedgerV2: any, FeePaymentV2: any, FeePaymentRequestV2: any, FeeReceiptV2: any, BatchVerifiedStudentsV2: any, AttendanceRecord: any, FacultyContract: any, FacultyEarningV2: any, AuditLog: any;
 
 const initModels = () => {
   Batch = mongoose.models.Batch || mongoose.model('Batch', batchSchema);
@@ -104,6 +144,9 @@ const initModels = () => {
   PricingRule = mongoose.models.PricingRule || mongoose.model('PricingRule', pricingRuleSchema);
   StudentFeeLedgerV2 = mongoose.models.StudentFeeLedgerV2 || mongoose.model('StudentFeeLedgerV2', studentFeeLedgerV2Schema);
   FeePaymentV2 = mongoose.models.FeePaymentV2 || mongoose.model('FeePaymentV2', feePaymentsV2Schema);
+  FeePaymentRequestV2 = mongoose.models.FeePaymentRequestV2 || mongoose.model('FeePaymentRequestV2', feePaymentRequestV2Schema);
+  FeeReceiptV2 = mongoose.models.FeeReceiptV2 || mongoose.model('FeeReceiptV2', feeReceiptV2Schema);
+  BatchVerifiedStudentsV2 = mongoose.models.BatchVerifiedStudentsV2 || mongoose.model('BatchVerifiedStudentsV2', batchVerifiedStudentsV2Schema);
   AttendanceRecord = mongoose.models.AttendanceRecord || mongoose.model('AttendanceRecord', attendanceRecordSchema);
   FacultyContract = mongoose.models.FacultyContract || mongoose.model('FacultyContract', facultyContractSchema);
   FacultyEarningV2 = mongoose.models.FacultyEarningV2 || mongoose.model('FacultyEarningV2', facultyEarningV2Schema);
@@ -115,7 +158,7 @@ if (useMongo) {
 }
 
 // Local Fallback State (for AI Studio Preview)
-let localData: any = { batches: [], routines: [], downloads: [], fees: [], enrollments: [], chatUsers: [], chatMessages: [], chatSettings: [], pricing_plans: [], pricing_rules: [], student_fee_ledger_v2: [], fee_payments_v2: [], attendance_records: [], faculty_contracts: [], faculty_earnings_v2: [], audit_logs: [] };
+let localData: any = { batches: [], routines: [], downloads: [], fees: [], enrollments: [], chatUsers: [], chatMessages: [], chatSettings: [], pricing_plans: [], pricing_rules: [], student_fee_ledger_v2: [], fee_payments_v2: [], fee_payment_requests_v2: [], fee_receipts_v2: [], batch_verified_students_v2: [], attendance_records: [], faculty_contracts: [], faculty_earnings_v2: [], audit_logs: [] };
 const LOCAL_FILE = 'local_db.json';
 
 export const initDB = async () => {
@@ -231,6 +274,9 @@ const getModel = (type: string) => {
     case 'pricing_rules': return PricingRule;
     case 'student_fee_ledger_v2': return StudentFeeLedgerV2;
     case 'fee_payments_v2': return FeePaymentV2;
+    case 'fee_payment_requests_v2': return FeePaymentRequestV2;
+    case 'fee_receipts_v2': return FeeReceiptV2;
+    case 'batch_verified_students_v2': return BatchVerifiedStudentsV2;
     case 'attendance_records': return AttendanceRecord;
     case 'faculty_contracts': return FacultyContract;
     case 'faculty_earnings_v2': return FacultyEarningV2;

@@ -1,7 +1,13 @@
 import { Router } from 'express';
-import { handlePaymentController } from './controller.js';
+import {
+  listPaymentRequestsController,
+  submitPaymentRequestController,
+  verifyPaymentRequestController
+} from './controller.js';
 
 const router = Router();
-router.post('/collect', handlePaymentController);
+router.post('/requests', submitPaymentRequestController);
+router.get('/requests', listPaymentRequestsController);
+router.post('/requests/verify', verifyPaymentRequestController);
 
 export default router;
