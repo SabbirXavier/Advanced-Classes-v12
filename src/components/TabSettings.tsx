@@ -8,6 +8,7 @@ import { compressImage } from '../lib/imageUtils';
 import { storageService } from '../services/storageService';
 import ImageCropper from './ImageCropper';
 import toast, { Toaster } from 'react-hot-toast';
+import { firestoreService } from '../services/firestoreService';
 
 interface TabSettingsProps {
   onNavigate: (tab: string) => void;
@@ -89,6 +90,8 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
 
   const [isDarkMode, setIsDarkMode] = useState(document.documentElement.classList.contains('dark'));
   const [errorConsoleEnabled, setErrorConsoleEnabled] = useState(localStorage.getItem('errorConsoleEnabled') === 'true');
+  const [feeDetailRows, setFeeDetailRows] = useState<any[]>([]);
+  const [feeReceipts, setFeeReceipts] = useState<any[]>([]);
 
   useEffect(() => {
     let unsubscribeDoc: () => void;
@@ -167,6 +170,28 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
       if (unsubscribeDoc) unsubscribeDoc();
     };
   }, []);
+
+  useEffect(() => {
+    if (!userData?.uid && !userData?.email) return;
+    const unsubLedger = firestoreService.listenToCollection('student_monthly_fee_ledger', (rows: any[]) => {
+      if (userData?.role === 'admin' || userData?.role === 'faculty') {
+        setFeeDetailRows(rows.slice(0, 50));
+      } else {
+        setFeeDetailRows(rows.filter((r: any) => r.studentId === userData.uid));
+      }
+    });
+    const unsubReceipts = firestoreService.listenToCollection('fee_receipts', (rows: any[]) => {
+      if (userData?.role === 'admin' || userData?.role === 'faculty') {
+        setFeeReceipts(rows.slice(0, 50));
+      } else {
+        setFeeReceipts(rows.filter((r: any) => r.studentId === userData.uid));
+      }
+    });
+    return () => {
+      unsubLedger();
+      unsubReceipts();
+    };
+  }, [userData?.uid, userData?.email, userData?.role]);
 
   const toggleDarkMode = () => {
     const isDark = document.documentElement.classList.contains('dark');
@@ -768,6 +793,52 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
                       accept="image/*" 
                       className="hidden" 
                     />
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Fee Detail</h2>
+              <div className="space-y-3">
+                <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-2xl">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-bold">Monthly Tuition Status</p>
+                    <span className="text-[10px] opacity-60">Paid / Unpaid / Pending</span>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                    {feeDetailRows.slice(0, 30).map((row: any) => (
+                      <div key={row.id || `${row.studentId}_${row.month}`} className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-[#111] border border-gray-200 dark:border-white/10 text-xs">
+                        <div>
+                          <p className="font-bold">{row.studentName ? `${row.studentName} • ${row.month}` : row.month}</p>
+                          <p className="opacity-60">Fee ₹{Math.round(Number(row.totalFee || 0)).toLocaleString()} • Paid ₹{Math.round(Number(row.paidAmount || 0)).toLocaleString()}</p>
+                        </div>
+                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${String(row.status || '').toLowerCase() === 'cleared' ? 'bg-green-500/20 text-green-500' : String(row.status || '').toLowerCase() === 'partial' ? 'bg-amber-500/20 text-amber-500' : 'bg-red-500/20 text-red-500'}`}>
+                          {row.status || 'Pending'}
+                        </span>
+                      </div>
+                    ))}
+                    {feeDetailRows.length === 0 && <p className="text-xs opacity-50 italic">No fee details available yet.</p>}
+                  </div>
+                </div>
+
+                <div className="p-4 bg-gray-50 dark:bg-white/5 rounded-2xl">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-bold">Receipts</p>
+                    <span className="text-[10px] opacity-60">Computer generated</span>
+                  </div>
+                  <p className="text-[10px] opacity-50 mb-2">Computer generated receipt. No signature required.</p>
+                  <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                    {feeReceipts.slice(0, 30).map((r: any) => (
+                      <div key={r.id || r.receiptId} className="p-2 rounded-lg bg-white dark:bg-[#111] border border-gray-200 dark:border-white/10 text-xs">
+                        <div className="flex justify-between items-center">
+                          <p className="font-bold">Receipt #{r.receiptId || r.id}</p>
+                          <p className="font-bold text-emerald-500">₹{Math.round(Number(r.amount || 0)).toLocaleString()}</p>
+                        </div>
+                        <p className="opacity-60">{r.transactionId ? `Txn: ${r.transactionId}` : 'No transaction reference'}</p>
+                      </div>
+                    ))}
+                    {feeReceipts.length === 0 && <p className="text-xs opacity-50 italic">No receipts available yet.</p>}
                   </div>
                 </div>
               </div>

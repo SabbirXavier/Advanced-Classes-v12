@@ -70,6 +70,47 @@ export interface MonthlyLedgerInput {
   mode?: string;
 }
 
+export interface MonthlyAllocationInput {
+  month: string;
+  amount: number;
+}
+
+const monthKeyFromDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const parseMonthKey = (month: string) => {
+  const [y, m] = month.split('-').map(Number);
+  if (!y || !m) return null;
+  return new Date(y, m - 1, 1);
+};
+const addMonths = (month: string, delta: number) => {
+  const parsed = parseMonthKey(month);
+  if (!parsed) return month;
+  parsed.setMonth(parsed.getMonth() + delta);
+  return monthKeyFromDate(parsed);
+};
+const monthsBetween = (startMonth: string, endMonth: string) => {
+  const start = parseMonthKey(startMonth);
+  const end = parseMonthKey(endMonth);
+  if (!start || !end || start > end) return [];
+  const out: string[] = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    out.push(monthKeyFromDate(cursor));
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return out;
+};
+const toDateMaybe = (value: any): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value?.toDate === 'function') return value.toDate();
+  if (typeof value?.seconds === 'number') return new Date(value.seconds * 1000);
+  if (typeof value === 'string') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+};
+
 const normalizePricing = (item: any): SubjectPricing => {
   const originalPrice = Number(item.originalPrice || 0);
   const discount = Number(item.discount || 0);
@@ -166,6 +207,158 @@ const ruleMatches = (rule: PricingRule, subjects: string[], grade?: string, paym
 };
 
 export const pricingService = {
+  getEnrollmentStartMonth(enrollment: any) {
+    const startDate = toDateMaybe(
+      enrollment?.enrollmentDate
+      || enrollment?.joinedAt
+      || enrollment?.admissionDate
+      || enrollment?.createdAt
+      || enrollment?.date
+    ) || new Date();
+    return monthKeyFromDate(startDate);
+  },
+
+  getStudentMonthlyFee(enrollment: any) {
+    const explicitMonthly = Number(enrollment?.monthlyFee || 0);
+    if (explicitMonthly > 0) return explicitMonthly;
+    const totalFee = Number(enrollment?.totalFee || 0);
+    const discount = Number(enrollment?.discount || 0);
+    return Math.max(0, totalFee - discount);
+  },
+
+  async ensureMonthlyLedger(studentId: string, studentName: string, enrollment: any, uptoMonth: string) {
+    const startMonth = this.getEnrollmentStartMonth(enrollment);
+    const monthFee = this.getStudentMonthlyFee(enrollment);
+    const months = monthsBetween(startMonth, uptoMonth);
+    if (months.length === 0) return [];
+    const snap = await getDocs(query(collection(db, 'student_monthly_fee_ledger'), where('studentId', '==', studentId)));
+    const existing = new Map<string, any>();
+    snap.docs.forEach((d) => {
+      const data: any = d.data();
+      existing.set(data.month || d.id.split('_').slice(1).join('_'), { id: d.id, ...data });
+    });
+    const batch = writeBatch(db);
+    let hasWrites = false;
+    months.forEach((month) => {
+      const docId = `${studentId}_${month}`;
+      const found = existing.get(month);
+      if (!found) {
+        hasWrites = true;
+        batch.set(doc(db, 'student_monthly_fee_ledger', docId), {
+          studentId,
+          studentName,
+          month,
+          totalFee: monthFee,
+          paidAmount: 0,
+          dueAmount: monthFee,
+          status: 'Pending',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
+    });
+    if (hasWrites) await batch.commit();
+    const refreshed = await getDocs(query(collection(db, 'student_monthly_fee_ledger'), where('studentId', '==', studentId)));
+    return refreshed.docs.map((d) => ({ id: d.id, ...d.data() }));
+  },
+
+  async allocatePaymentToMonths(input: {
+    studentId: string;
+    studentName: string;
+    enrollment: any;
+    amount: number;
+    transactionId?: string;
+    paymentId?: string;
+    mode?: string;
+    allocations?: MonthlyAllocationInput[];
+    paidBy?: string;
+    title?: string;
+    notes?: string;
+    screenshotUrl?: string;
+  }) {
+    const totalAmount = Number(input.amount || 0);
+    if (totalAmount <= 0) throw new Error('Amount should be greater than zero');
+    const currentMonth = monthKeyFromDate(new Date());
+    await this.ensureMonthlyLedger(input.studentId, input.studentName, input.enrollment, addMonths(currentMonth, 1));
+    const snap = await getDocs(query(collection(db, 'student_monthly_fee_ledger'), where('studentId', '==', input.studentId)));
+    const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))
+      .sort((a, b) => String(a.month || '').localeCompare(String(b.month || '')));
+
+    const rowMap = new Map(rows.map((r) => [r.month, r]));
+    const applied: Array<{ month: string; appliedAmount: number; beforeDue: number; afterDue: number; status: string }> = [];
+    let remaining = totalAmount;
+
+    const applyOnMonth = (month: string, requested?: number) => {
+      const row = rowMap.get(month);
+      if (!row || remaining <= 0) return;
+      const totalFee = Number(row.totalFee || this.getStudentMonthlyFee(input.enrollment));
+      const paidAmount = Number(row.paidAmount || 0);
+      const computedDue = Math.max(0, Number(row.dueAmount ?? (totalFee - paidAmount)));
+      if (computedDue <= 0) return;
+      const cap = requested !== undefined ? Math.max(0, Number(requested || 0)) : computedDue;
+      const use = Math.min(computedDue, cap, remaining);
+      if (use <= 0) return;
+      const nextPaid = paidAmount + use;
+      const nextDue = Math.max(0, computedDue - use);
+      row.paidAmount = nextPaid;
+      row.dueAmount = nextDue;
+      row.totalFee = totalFee;
+      row.status = nextDue <= 0 ? 'Cleared' : 'Partial';
+      applied.push({ month, appliedAmount: use, beforeDue: computedDue, afterDue: nextDue, status: row.status });
+      remaining -= use;
+    };
+
+    (input.allocations || []).forEach((a) => applyOnMonth(a.month, a.amount));
+    rows.forEach((r) => applyOnMonth(r.month));
+
+    const paymentRef = doc(collection(db, 'fee_payments'));
+    const receiptRef = doc(collection(db, 'fee_receipts'));
+    const batch = writeBatch(db);
+    batch.set(paymentRef, {
+      paymentId: paymentRef.id,
+      studentId: input.studentId,
+      studentName: input.studentName,
+      amount: totalAmount,
+      mode: input.mode || 'manual',
+      txId: input.transactionId || '',
+      linkedPaymentHistoryId: input.paymentId || '',
+      allocations: applied,
+      excessAmount: remaining,
+      createdAt: serverTimestamp(),
+      createdBy: input.paidBy || input.studentId,
+    });
+    rows.forEach((row) => {
+      batch.set(doc(db, 'student_monthly_fee_ledger', row.id), {
+        totalFee: Number(row.totalFee || this.getStudentMonthlyFee(input.enrollment)),
+        paidAmount: Number(row.paidAmount || 0),
+        dueAmount: Math.max(0, Number(row.dueAmount || 0)),
+        status: row.status || 'Pending',
+        lastPaymentId: paymentRef.id,
+        lastTransactionId: input.transactionId || '',
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+    batch.set(receiptRef, {
+      receiptId: receiptRef.id,
+      studentId: input.studentId,
+      studentName: input.studentName,
+      amount: totalAmount,
+      allocations: applied,
+      excessAmount: remaining,
+      transactionId: input.transactionId || '',
+      title: input.title || `Fee Receipt - ${input.studentName}`,
+      notes: input.notes || '',
+      screenshotUrl: input.screenshotUrl || '',
+      disclaimer: 'Computer generated receipt. No signature required.',
+      createdAt: serverTimestamp(),
+      createdBy: input.paidBy || input.studentId,
+    });
+    await batch.commit();
+
+    const outstanding = rows.reduce((sum, row) => sum + Math.max(0, Number(row.dueAmount || 0)), 0);
+    return { receiptId: receiptRef.id, paymentId: paymentRef.id, allocations: applied, excessAmount: remaining, outstanding };
+  },
+
   async getSubjectPricing(): Promise<SubjectPricing[]> {
     const plansSnap = await getDocs(query(collection(db, 'pricing_plans'), where('isActive', '!=', false)));
     if (!plansSnap.empty) {

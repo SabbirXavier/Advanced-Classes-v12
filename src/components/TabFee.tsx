@@ -97,6 +97,60 @@ function TabFee({ branding }: TabFeeProps) {
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [monthAllocations, setMonthAllocations] = useState<Array<{ id: string; month: string; amount: string }>>([
+    { id: `month_${Date.now()}`, month: new Date().toISOString().slice(0, 7), amount: '' }
+  ]);
+  const [monthlyLedgerRows, setMonthlyLedgerRows] = useState<any[]>([]);
+  const [feeReceipts, setFeeReceipts] = useState<any[]>([]);
+
+  const availableMonths = React.useMemo(() => {
+    const startRaw = enrollment?.enrollmentDate || enrollment?.joinedAt || enrollment?.createdAt || new Date();
+    const start = startRaw?.toDate ? startRaw.toDate() : new Date(startRaw);
+    if (Number.isNaN(start.getTime())) return [new Date().toISOString().slice(0, 7)];
+    const months: string[] = [];
+    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    const until = new Date();
+    until.setMonth(until.getMonth() + 6);
+    while (cursor <= until) {
+      months.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return months;
+  }, [enrollment]);
+
+  useEffect(() => {
+    if (!enrollment?.id) {
+      setMonthlyLedgerRows([]);
+      setFeeReceipts([]);
+      return;
+    }
+    const month = new Date();
+    month.setMonth(month.getMonth() + 1);
+    pricingService.ensureMonthlyLedger(
+      enrollment.id,
+      enrollment.name || enrollment.email || 'Student',
+      enrollment,
+      `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`
+    ).catch(() => null);
+    const unsubLedger = firestoreService.listenToCollection('student_monthly_fee_ledger', (rows: any[]) => {
+      setMonthlyLedgerRows(
+        rows
+          .filter((r: any) => r.studentId === enrollment.id)
+          .sort((a: any, b: any) => String(a.month || '').localeCompare(String(b.month || '')))
+      );
+    });
+    const unsubReceipts = firestoreService.listenToCollection('fee_receipts', (rows: any[]) => {
+      setFeeReceipts(
+        rows
+          .filter((r: any) => r.studentId === enrollment.id)
+          .sort((a: any, b: any) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
+      );
+    });
+    return () => {
+      unsubLedger();
+      unsubReceipts();
+    };
+  }, [enrollment?.id]);
 
   const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,14 +178,21 @@ function TabFee({ branding }: TabFeeProps) {
         lastPaymentAttempt: serverTimestamp()
       });
 
-      await pricingService.recordPaymentAndUpdateLedger({
-        studentId: user?.uid || enrollment.id,
+      const allocationResult = await pricingService.allocatePaymentToMonths({
+        studentId: enrollment.id,
         studentName: enrollment.name,
-        month: new Date().toISOString().slice(0, 7),
+        enrollment,
         amount: parseFloat(paymentData.amount || netPayable.toString()),
         paymentId: newPayment.id,
         transactionId: paymentData.transactionId,
         mode: 'upi',
+        allocations: monthAllocations
+          .map((row) => ({ month: row.month, amount: Number(row.amount || 0) }))
+          .filter((row) => row.month && row.amount > 0),
+        paidBy: user?.uid || enrollment.id,
+        title: `Fee Receipt: ${enrollment.name}`,
+        notes: paymentData.notes,
+        screenshotUrl: paymentData.screenshotUrl,
       });
       
       // Also add to global finances for admin review
@@ -144,6 +205,8 @@ function TabFee({ branding }: TabFeeProps) {
         studentName: enrollment.name,
         transactionId: paymentData.transactionId,
         screenshotUrl: paymentData.screenshotUrl,
+        receiptId: allocationResult.receiptId,
+        feeAllocations: allocationResult.allocations,
         date: Timestamp.now(),
         status: 'pending',
         createdAt: serverTimestamp()
@@ -152,6 +215,7 @@ function TabFee({ branding }: TabFeeProps) {
       toast.success('Payment submitted! Admin will verify soon.', { id: toastId });
       setIsPaymentConfirmOpen(false);
       setPaymentData({ transactionId: '', screenshotUrl: '', notes: '', amount: '' });
+      setMonthAllocations([{ id: `month_${Date.now()}`, month: new Date().toISOString().slice(0, 7), amount: '' }]);
     } catch (err) {
       toast.error('Failed to submit. Try again.', { id: toastId });
     } finally {
@@ -629,6 +693,44 @@ function TabFee({ branding }: TabFeeProps) {
         )}
       </div>
 
+      <div className="glass-card mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-black uppercase tracking-widest opacity-70">Monthly Fee Detail</h3>
+          <span className="text-[10px] px-2 py-1 rounded-lg bg-white/10">From enrollment date</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-white/5">
+              <tr>
+                <th className="p-3">Month</th>
+                <th className="p-3 text-right">Total Fee</th>
+                <th className="p-3 text-right">Paid</th>
+                <th className="p-3 text-right">Balance</th>
+                <th className="p-3 text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthlyLedgerRows.map((row) => (
+                <tr key={row.id} className="border-t border-[var(--border-color)]">
+                  <td className="p-3 font-semibold">{row.month}</td>
+                  <td className="p-3 text-right">₹{Math.round(Number(row.totalFee || 0)).toLocaleString()}</td>
+                  <td className="p-3 text-right text-green-500">₹{Math.round(Number(row.paidAmount || 0)).toLocaleString()}</td>
+                  <td className="p-3 text-right text-amber-400">₹{Math.round(Number(row.dueAmount || 0)).toLocaleString()}</td>
+                  <td className="p-3 text-center">
+                    <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${String(row.status || '').toLowerCase() === 'cleared' ? 'bg-green-500/20 text-green-500' : String(row.status || '').toLowerCase() === 'partial' ? 'bg-amber-500/20 text-amber-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {row.status || (Number(row.dueAmount || 0) <= 0 ? 'Cleared' : 'Pending')}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {monthlyLedgerRows.length === 0 && (
+                <tr><td colSpan={5} className="p-4 text-center opacity-60 italic">No monthly fee entries yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div id="payment-methods" className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Option 1: Payment QR */}
         <div className="glass-card flex flex-col items-center justify-center text-center p-8">
@@ -813,6 +915,52 @@ function TabFee({ branding }: TabFeeProps) {
                  />
                </div>
 
+               <div className="space-y-2">
+                 <div className="flex items-center justify-between">
+                   <label className="text-[10px] font-black uppercase opacity-40 ml-1">Fee Month Allocation</label>
+                   <button type="button" onClick={() => setMonthAllocations(prev => [...prev, { id: `month_${Date.now()}_${prev.length}`, month: new Date().toISOString().slice(0, 7), amount: '' }])} className="text-[10px] px-2 py-1 rounded bg-emerald-500/15 text-emerald-500 font-black uppercase flex items-center gap-1">
+                     <Plus size={12} /> Add
+                   </button>
+                 </div>
+                 <div className="rounded-xl border border-white/10 overflow-hidden">
+                   <table className="w-full text-xs">
+                     <thead className="bg-white/5">
+                       <tr>
+                         <th className="p-2 text-left">Month</th>
+                         <th className="p-2 text-right">Due</th>
+                         <th className="p-2 text-right">Payment</th>
+                         <th className="p-2"></th>
+                       </tr>
+                     </thead>
+                     <tbody>
+                       {monthAllocations.map((row, idx) => {
+                         const monthLedger = monthlyLedgerRows.find((l: any) => l.month === row.month);
+                         const due = Number(monthLedger?.dueAmount || 0);
+                         const isCleared = String(monthLedger?.status || '').toLowerCase() === 'cleared' || due <= 0;
+                         return (
+                           <tr key={row.id} className="border-t border-white/5">
+                             <td className="p-2">
+                               <select value={row.month} disabled={isCleared} onChange={(e) => setMonthAllocations(prev => prev.map((r, i) => i === idx ? { ...r, month: e.target.value } : r))} className="w-full p-2 bg-white/5 border border-white/10 rounded-lg">
+                                 {availableMonths.map((m) => <option key={`${row.id}_${m}`} value={m}>{m}</option>)}
+                               </select>
+                             </td>
+                             <td className="p-2 text-right font-bold text-amber-400">{isCleared ? 'Cleared' : `₹${Math.round(due).toLocaleString()}`}</td>
+                             <td className="p-2">
+                               <input type="number" min={0} max={due} disabled={isCleared} value={row.amount} onChange={(e) => setMonthAllocations(prev => prev.map((r, i) => i === idx ? { ...r, amount: e.target.value } : r))} className="w-full p-2 text-right bg-white/5 border border-white/10 rounded-lg" />
+                             </td>
+                             <td className="p-2 text-right">
+                               {monthAllocations.length > 1 && (
+                                 <button type="button" onClick={() => setMonthAllocations(prev => prev.filter((_, i) => i !== idx))} className="text-[10px] text-red-400 font-black">Remove</button>
+                               )}
+                             </td>
+                           </tr>
+                         );
+                       })}
+                     </tbody>
+                   </table>
+                 </div>
+               </div>
+
                <div className="space-y-1">
                  <label className="text-[10px] font-black uppercase opacity-40 ml-1">Payment Image / Screenshot</label>
                  <div className="relative">
@@ -893,6 +1041,23 @@ function TabFee({ branding }: TabFeeProps) {
           </motion.div>
         </div>
       )}
+
+      <div className="mt-8 glass-card">
+        <div className="flex items-center gap-2 mb-3"><FileText size={16} /> <h4 className="font-black text-sm uppercase">Receipts</h4></div>
+        <p className="text-[10px] opacity-60 mb-3">Computer generated receipt. No signature required.</p>
+        <div className="space-y-2">
+          {feeReceipts.slice(0, 20).map((r) => (
+            <div key={r.id || r.receiptId} className="p-3 rounded-xl bg-white/5 border border-white/10 text-xs">
+              <div className="flex justify-between">
+                <div className="font-bold">Receipt #{r.receiptId || r.id}</div>
+                <div className="font-bold text-green-500">₹{Math.round(Number(r.amount || 0)).toLocaleString()}</div>
+              </div>
+              <div className="opacity-60 mt-1">{r.transactionId ? `Txn: ${r.transactionId}` : 'No transaction id'}</div>
+            </div>
+          ))}
+          {feeReceipts.length === 0 && <div className="text-xs opacity-50 italic">No receipts yet.</div>}
+        </div>
+      </div>
     </div>
   );
 }

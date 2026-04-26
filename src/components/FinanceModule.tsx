@@ -74,6 +74,10 @@ export default function FinanceModule() {
     studentName: ''
   });
   const [isUploading, setIsUploading] = useState(false);
+  const [feeMonthRows, setFeeMonthRows] = useState<Array<{ id: string; month: string; amount: string }>>([
+    { id: `row_${Date.now()}`, month: new Date().toISOString().slice(0, 7), amount: '' }
+  ]);
+  const [studentLedgerPreview, setStudentLedgerPreview] = useState<any[]>([]);
 
   const [dateFilter, setDateFilter] = useState({
     start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
@@ -92,6 +96,54 @@ export default function FinanceModule() {
     maxDue: '',
     sortBy: 'due_desc' as 'due_desc' | 'due_asc' | 'name_asc' | 'name_desc',
   });
+
+  const selectedEnrollment = React.useMemo(
+    () => enrollments.find((e: any) => e.id === newEntry.studentId || e.userId === newEntry.studentId || e.uid === newEntry.studentId),
+    [enrollments, newEntry.studentId]
+  );
+
+  const availableFeeMonths = React.useMemo(() => {
+    const startDateRaw = selectedEnrollment?.enrollmentDate
+      || selectedEnrollment?.joinedAt
+      || selectedEnrollment?.createdAt
+      || new Date();
+    const startDate = startDateRaw?.toDate ? startDateRaw.toDate() : new Date(startDateRaw);
+    if (Number.isNaN(startDate.getTime())) return [new Date().toISOString().slice(0, 7)];
+    const months: string[] = [];
+    const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const last = new Date();
+    last.setMonth(last.getMonth() + 6);
+    while (cursor <= last) {
+      months.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return months;
+  }, [selectedEnrollment]);
+
+  const refreshStudentLedgerPreview = async (studentId: string) => {
+    const enrollmentRecord = enrollments.find((e: any) => e.id === studentId || e.userId === studentId || e.uid === studentId);
+    if (!enrollmentRecord) {
+      setStudentLedgerPreview([]);
+      return;
+    }
+    try {
+      const month = new Date();
+      month.setMonth(month.getMonth() + 1);
+      const upto = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
+      const rows = await pricingService.ensureMonthlyLedger(
+        enrollmentRecord.id,
+        enrollmentRecord.name || enrollmentRecord.email || 'Student',
+        enrollmentRecord,
+        upto
+      );
+      setStudentLedgerPreview(
+        rows.sort((a: any, b: any) => String(a.month || '').localeCompare(String(b.month || '')))
+      );
+    } catch (err) {
+      console.error('Failed to load student monthly ledger', err);
+      setStudentLedgerPreview([]);
+    }
+  };
 
   useEffect(() => {
     const unsubFinances = firestoreService.listenToCollection('finances', (data) => {
@@ -133,9 +185,46 @@ export default function FinanceModule() {
 
     try {
       const entryId = (newEntry as any).id;
+      const parsedAmount = parseFloat(newEntry.amount);
+      let feeMeta: any = {};
+      if (newEntry.category === 'Fee' && newEntry.type === 'income' && newEntry.studentId && parsedAmount > 0) {
+        const student = selectedEnrollment;
+        if (!student) {
+          toast.error('Please link a valid enrolled student for fee collection');
+          return;
+        }
+        const cleanedAllocations = feeMonthRows
+          .map((r) => ({ month: r.month, amount: Number(r.amount || 0) }))
+          .filter((r) => r.month && r.amount > 0);
+        const allocationResult = await pricingService.allocatePaymentToMonths({
+          studentId: student.id,
+          studentName: student.name || student.email || 'Student',
+          enrollment: student,
+          amount: parsedAmount,
+          transactionId: newEntry.transactionId,
+          mode: 'admin-finance',
+          paidBy: 'admin',
+          title: newEntry.title,
+          notes: newEntry.notes,
+          screenshotUrl: newEntry.screenshotUrl,
+          allocations: cleanedAllocations,
+        });
+        feeMeta = {
+          receiptId: allocationResult.receiptId,
+          feeAllocations: allocationResult.allocations,
+          feeExcessAmount: allocationResult.excessAmount,
+          feeOutstandingAfterPayment: allocationResult.outstanding,
+        };
+        const priorPaid = Number(student.totalPaid || 0);
+        await firestoreService.updateItem('enrollments', student.id, {
+          totalPaid: priorPaid + parsedAmount,
+          feeStatus: allocationResult.outstanding <= 0 ? 'Paid' : 'Pending'
+        });
+      }
       const data = {
         ...newEntry,
-        amount: parseFloat(newEntry.amount),
+        ...feeMeta,
+        amount: parsedAmount,
         date: Timestamp.fromDate(new Date(newEntry.date)),
         updatedAt: Timestamp.now()
       };
@@ -165,6 +254,8 @@ export default function FinanceModule() {
         studentId: '',
         studentName: ''
       });
+      setFeeMonthRows([{ id: `row_${Date.now()}`, month: new Date().toISOString().slice(0, 7), amount: '' }]);
+      setStudentLedgerPreview([]);
     } catch (err) {
       toast.error('Failed to save entry');
     }
@@ -1119,17 +1210,19 @@ Please clear your pending dues to continue accessing batch materials.`;
                         className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl text-sm font-bold outline-none [&>option]:bg-[#1e1e1e]"
                         value={newEntry.studentId}
                         onChange={e => {
-                          const student = users.find(u => u.id === e.target.value);
+                          const student = enrollments.find((u: any) => u.id === e.target.value);
                           setNewEntry({
                             ...newEntry, 
                             studentId: e.target.value,
                             studentName: student?.name || '',
                             title: student ? `Fee Receipt: ${student.name}` : newEntry.title
                           });
+                          setFeeMonthRows([{ id: `row_${Date.now()}`, month: new Date().toISOString().slice(0, 7), amount: newEntry.amount || '' }]);
+                          refreshStudentLedgerPreview(e.target.value);
                         }}
                       >
                         <option value="">Select Student...</option>
-                        {users.filter(u => u.role === 'student' || !u.role).map(u => (
+                        {enrollments.map((u: any) => (
                           <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
                         ))}
                       </select>
@@ -1179,6 +1272,80 @@ Please clear your pending dues to continue accessing batch materials.`;
                         </div>
                       </div>
                     </div>
+
+                    {newEntry.studentId && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-black uppercase opacity-50 tracking-widest pl-1">Fee Month Selection</label>
+                          <button
+                            type="button"
+                            onClick={() => setFeeMonthRows(prev => [...prev, { id: `row_${Date.now()}_${prev.length}`, month: new Date().toISOString().slice(0, 7), amount: '' }])}
+                            className="px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-500 text-[10px] font-black uppercase flex items-center gap-1"
+                          >
+                            <Plus size={12} /> Add Month
+                          </button>
+                        </div>
+                        <div className="rounded-xl border border-white/10 overflow-hidden">
+                          <table className="w-full text-xs">
+                            <thead className="bg-white/5">
+                              <tr>
+                                <th className="p-2 text-left">Month</th>
+                                <th className="p-2 text-right">Month Fee</th>
+                                <th className="p-2 text-right">Balance</th>
+                                <th className="p-2 text-right">Payment</th>
+                                <th className="p-2 text-center">Status</th>
+                                <th className="p-2"></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {feeMonthRows.map((row, idx) => {
+                                const monthLedger = studentLedgerPreview.find((l: any) => l.month === row.month);
+                                const due = Number(monthLedger?.dueAmount ?? Math.max(0, Number(selectedEnrollment?.totalFee || 0) - Number(selectedEnrollment?.discount || 0)));
+                                const totalFee = Number(monthLedger?.totalFee ?? Math.max(0, Number(selectedEnrollment?.totalFee || 0) - Number(selectedEnrollment?.discount || 0)));
+                                const status = monthLedger?.status || (due <= 0 ? 'Cleared' : 'Pending');
+                                return (
+                                  <tr key={row.id} className="border-t border-white/5">
+                                    <td className="p-2">
+                                      <select
+                                        className="w-full p-2 bg-white/5 border border-white/10 rounded-lg"
+                                        value={row.month}
+                                        disabled={status === 'Cleared'}
+                                        onChange={(e) => setFeeMonthRows(prev => prev.map((r, i) => i === idx ? { ...r, month: e.target.value } : r))}
+                                      >
+                                        {availableFeeMonths.map((m) => <option key={`${row.id}_${m}`} value={m}>{m}</option>)}
+                                      </select>
+                                    </td>
+                                    <td className="p-2 text-right font-bold">₹{Math.round(totalFee).toLocaleString()}</td>
+                                    <td className="p-2 text-right font-bold text-amber-400">₹{Math.round(due).toLocaleString()}</td>
+                                    <td className="p-2">
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        max={due}
+                                        disabled={status === 'Cleared'}
+                                        value={row.amount}
+                                        onChange={(e) => setFeeMonthRows(prev => prev.map((r, i) => i === idx ? { ...r, amount: e.target.value } : r))}
+                                        className="w-full p-2 bg-white/5 border border-white/10 rounded-lg text-right"
+                                      />
+                                    </td>
+                                    <td className="p-2 text-center">
+                                      <span className={`px-2 py-1 rounded text-[10px] font-black ${status === 'Cleared' ? 'bg-green-500/20 text-green-500' : status === 'Partial' ? 'bg-amber-500/20 text-amber-400' : 'bg-white/10'}`}>
+                                        {status}
+                                      </span>
+                                    </td>
+                                    <td className="p-2 text-right">
+                                      {feeMonthRows.length > 1 && (
+                                        <button type="button" onClick={() => setFeeMonthRows(prev => prev.filter((_, i) => i !== idx))} className="text-red-400 text-[10px] font-black">Remove</button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
