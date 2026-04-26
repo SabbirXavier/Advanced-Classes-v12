@@ -16,6 +16,12 @@ interface TabFeeProps {
 }
 
 function TabFee({ branding }: TabFeeProps) {
+  const formatMonthLabel = (monthKey: string) => {
+    const [year, month] = String(monthKey || '').split('-').map(Number);
+    if (!year || !month) return monthKey;
+    return new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  };
+
   const [user, setUser] = useState<any>(null);
   const [enrollment, setEnrollment] = useState<any>(null);
   const [fees, setFees] = useState<any[]>([]);
@@ -712,13 +718,13 @@ function TabFee({ branding }: TabFeeProps) {
             <tbody>
               {monthlyLedgerRows.map((row) => (
                 <tr key={row.id} className="border-t border-[var(--border-color)]">
-                  <td className="p-3 font-semibold">{row.month}</td>
-                  <td className="p-3 text-right">₹{Math.round(Number(row.totalFee || 0)).toLocaleString()}</td>
+                  <td className="p-3 font-semibold">{formatMonthLabel(row.month)}</td>
+                  <td className="p-3 text-right">₹{Math.round(Number(row.totalFee || netPayable || 0)).toLocaleString()}</td>
                   <td className="p-3 text-right text-green-500">₹{Math.round(Number(row.paidAmount || 0)).toLocaleString()}</td>
                   <td className="p-3 text-right text-amber-400">₹{Math.round(Number(row.dueAmount || 0)).toLocaleString()}</td>
                   <td className="p-3 text-center">
                     <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${String(row.status || '').toLowerCase() === 'cleared' ? 'bg-green-500/20 text-green-500' : String(row.status || '').toLowerCase() === 'partial' ? 'bg-amber-500/20 text-amber-400' : 'bg-red-500/20 text-red-400'}`}>
-                      {row.status || (Number(row.dueAmount || 0) <= 0 ? 'Cleared' : 'Pending')}
+                      {String(row.status || '').toLowerCase() === 'pending verification' ? 'Pending' : (row.status || (Number(row.dueAmount || 0) <= 0 ? 'Cleared' : 'Pending'))}
                     </span>
                   </td>
                 </tr>
@@ -941,7 +947,7 @@ function TabFee({ branding }: TabFeeProps) {
                            <tr key={row.id} className="border-t border-white/5">
                              <td className="p-2">
                                <select value={row.month} disabled={isCleared} onChange={(e) => setMonthAllocations(prev => prev.map((r, i) => i === idx ? { ...r, month: e.target.value } : r))} className="w-full p-2 bg-white/5 border border-white/10 rounded-lg">
-                                 {availableMonths.map((m) => <option key={`${row.id}_${m}`} value={m}>{m}</option>)}
+                                 {availableMonths.map((m) => <option key={`${row.id}_${m}`} value={m}>{formatMonthLabel(m)}</option>)}
                                </select>
                              </td>
                              <td className="p-2 text-right font-bold text-amber-400">{isCleared ? 'Cleared' : `₹${Math.round(due).toLocaleString()}`}</td>

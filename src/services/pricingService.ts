@@ -255,6 +255,22 @@ export const pricingService = {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         }, { merge: true });
+      } else {
+        const currentTotalFee = Number(found.totalFee || 0);
+        const currentPaid = Number(found.paidAmount || 0);
+        const currentDue = Number(found.dueAmount ?? Math.max(0, currentTotalFee - currentPaid));
+        const nextTotalFee = currentTotalFee > 0 ? currentTotalFee : monthFee;
+        const nextDue = Math.max(0, currentTotalFee > 0 ? currentDue : (nextTotalFee - currentPaid));
+        const normalizedStatus = nextDue <= 0 ? 'Cleared' : (currentPaid > 0 ? 'Partial' : 'Pending');
+        if (currentTotalFee <= 0 || Number.isNaN(currentDue)) {
+          hasWrites = true;
+          batch.set(doc(db, 'student_monthly_fee_ledger', docId), {
+            totalFee: nextTotalFee,
+            dueAmount: nextDue,
+            status: found.status || normalizedStatus,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+        }
       }
     });
     if (hasWrites) await batch.commit();

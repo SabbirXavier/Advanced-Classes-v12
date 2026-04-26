@@ -64,6 +64,18 @@ const AvatarWithGifHandling = ({ src, name, isUploading }: { src: string | null 
 };
 
 export default function TabSettings({ onNavigate }: TabSettingsProps) {
+  const formatMonthLabel = (monthKey: string) => {
+    const [year, month] = String(monthKey || '').split('-').map(Number);
+    if (!year || !month) return monthKey;
+    return new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  };
+  const normalizeFeeStatus = (rawStatus: string, dueAmount: number, paidAmount: number) => {
+    const status = String(rawStatus || '').toLowerCase();
+    if (status === 'cleared' || dueAmount <= 0) return 'Paid';
+    if (status === 'partial' || paidAmount > 0) return 'Pending';
+    return 'Unpaid';
+  };
+
   const [user, setUser] = useState<any>(null);
   const [userData, setUserData] = useState<UserProfile | null>(null);
   const [chatBackground, setChatBackground] = useState(localStorage.getItem('chatBackground') || 'default');
@@ -808,15 +820,24 @@ export default function TabSettings({ onNavigate }: TabSettingsProps) {
                   </div>
                   <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
                     {feeDetailRows.slice(0, 30).map((row: any) => (
+                      (() => {
+                        const totalFee = Number(row.totalFee || 0);
+                        const paidAmount = Number(row.paidAmount || 0);
+                        const dueAmount = Number(row.dueAmount ?? Math.max(0, totalFee - paidAmount));
+                        const normalizedTotalFee = totalFee > 0 ? totalFee : (paidAmount + dueAmount);
+                        const statusLabel = normalizeFeeStatus(row.status, dueAmount, paidAmount);
+                        return (
                       <div key={row.id || `${row.studentId}_${row.month}`} className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-[#111] border border-gray-200 dark:border-white/10 text-xs">
                         <div>
-                          <p className="font-bold">{row.studentName ? `${row.studentName} • ${row.month}` : row.month}</p>
-                          <p className="opacity-60">Fee ₹{Math.round(Number(row.totalFee || 0)).toLocaleString()} • Paid ₹{Math.round(Number(row.paidAmount || 0)).toLocaleString()}</p>
+                          <p className="font-bold">{row.studentName ? `${row.studentName} • ${formatMonthLabel(row.month)}` : formatMonthLabel(row.month)}</p>
+                          <p className="opacity-60">Fee ₹{Math.round(normalizedTotalFee).toLocaleString()} • Paid ₹{Math.round(paidAmount).toLocaleString()}</p>
                         </div>
-                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${String(row.status || '').toLowerCase() === 'cleared' ? 'bg-green-500/20 text-green-500' : String(row.status || '').toLowerCase() === 'partial' ? 'bg-amber-500/20 text-amber-500' : 'bg-red-500/20 text-red-500'}`}>
-                          {row.status || 'Pending'}
+                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${statusLabel === 'Paid' ? 'bg-green-500/20 text-green-500' : statusLabel === 'Pending' ? 'bg-amber-500/20 text-amber-500' : 'bg-red-500/20 text-red-500'}`}>
+                          {statusLabel}
                         </span>
                       </div>
+                        );
+                      })()
                     ))}
                     {feeDetailRows.length === 0 && <p className="text-xs opacity-50 italic">No fee details available yet.</p>}
                   </div>
